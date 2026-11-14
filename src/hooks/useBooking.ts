@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   type BookingState,
   type BookingStep,
@@ -46,6 +46,14 @@ function getOccupiedSeats(movieId: string, date: string | null): Set<string> {
 export function useBooking() {
   const [state, setState] = useState<BookingState>(INITIAL_STATE);
   const [occupiedSeats, setOccupiedSeats] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setOccupiedSeats(
+      state.movie && state.date
+        ? getOccupiedSeats(state.movie.id, state.date)
+        : new Set()
+    );
+  }, [state.movie, state.date]);
 
   const reset = useCallback(() => {
     setState(INITIAL_STATE);
@@ -97,19 +105,14 @@ export function useBooking() {
   }, []);
 
   const selectDate = useCallback((date: string) => {
-    setState((prev) => {
-      if (prev.movie) {
-        setOccupiedSeats(getOccupiedSeats(prev.movie.id, date));
-      }
-      return {
-        ...prev,
-        date,
-        showtime: null,
-        ticketCount: 0,
-        seats: [],
-        step: "showtime",
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      date,
+      showtime: null,
+      ticketCount: 0,
+      seats: [],
+      step: "showtime",
+    }));
   }, []);
 
   const selectShowtime = useCallback((showtime: string) => {

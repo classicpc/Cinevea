@@ -20,7 +20,7 @@ import {
   type AssistantResponse,
 } from "@/lib/conversation";
 import { isAIEnabled } from "@/config";
-import { supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { Info, Loader2 } from "lucide-react";
 
 let msgId = 0;
@@ -31,6 +31,10 @@ function newId(): string {
 
 function App() {
   const { session, loading } = useAuth();
+
+  if (!isSupabaseConfigured) {
+    return <SetupScreen />;
+  }
 
   if (loading) {
     return (
@@ -45,6 +49,34 @@ function App() {
   }
 
   return <CineveaApp />;
+}
+
+function SetupScreen() {
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-100">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+        <h1 className="text-xl font-semibold">Cinevea setup required</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          The app is missing its Supabase connection settings, so it cannot load
+          authentication. Add these variables to the deployment environment and
+          reload the page:
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-950 p-4 text-sm text-cyan-300">
+{`VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+
+or
+
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...`}
+        </pre>
+        <p className="mt-4 text-xs text-slate-500">
+          For local development, put them in a <code>.env.local</code> file at
+          the project root.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function CineveaApp() {
@@ -257,7 +289,7 @@ function CineveaApp() {
 
     // Persist booking to Supabase
     const { state: bs } = booking;
-    if (bs.movie && bs.date && bs.showtime) {
+    if (supabase && bs.movie && bs.date && bs.showtime) {
       supabase
         .from("bookings")
         .insert({
