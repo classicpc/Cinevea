@@ -1,7 +1,6 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Mic, MicOff, Send, Volume2, VolumeX, AlertCircle, X } from "lucide-react";
 import { speechController, type SpeechRecognitionResult } from "@/lib/speech";
-import { transcribeAudio } from "@/lib/transcription";
 
 interface VoiceInputProps {
   onSendMessage: (text: string) => void;
@@ -11,18 +10,16 @@ interface VoiceInputProps {
 }
 
 export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }: VoiceInputProps) {
+  const voiceSupported = speechController.recognitionSupported;
   const [text, setText] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
   const [interim, setInterim] = useState("");
   const [micError, setMicError] = useState<string | null>(null);
-  const onSendMessageRef = useRef(onSendMessage);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const interimRef = useRef("");
 
-  // Keep the latest onSendMessage without re-creating the start handler
-  onSendMessageRef.current = onSendMessage;
+  useEffect(() => () => {
+    speechController.stopListening(false);
+  }, []);
 
   const startListening = useCallback(() => {
     setMicError(null);
@@ -31,91 +28,42 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
     speechController.startListening({
       onResult: (result: SpeechRecognitionResult) => {
         if (result.isFinal) {
+          interimRef.current = "";
           setInterim("");
-          setIsListening(false);
-          onSendMessageRef.current(result.transcript);
+          setText((current) => `${current}${current ? " " : ""}${result.transcript}`.trim());
         } else {
+          interimRef.current = result.transcript;
           setInterim(result.transcript);
         }
       },
       onError: (error: string) => {
+        interimRef.current = "";
         setIsListening(false);
         setInterim("");
         setMicError(error);
       },
+      onStart: () => {
+        setIsListening(true);
+      },
       onEnd: () => {
-        // Recognition ended without a final result — reset the listening state
+        const pending = interimRef.current.trim();
+        if (pending) {
+          setText((current) => `${current}${current ? " " : ""}${pending}`.trim());
+        }
+        interimRef.current = "";
         setIsListening(false);
         setInterim("");
       },
     });
   }, []);
 
-  const stopRecording = useCallback(() => {
-    recorderRef.current?.stop();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    if (speechController.recognitionSupported) {
-      startListening();
-      return;
-    }
-
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      startListening();
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(
-        (type) => MediaRecorder.isTypeSupported(type)
-      );
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-      streamRef.current = stream;
-      recorderRef.current = recorder;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = async () => {
-        recorderRef.current = null;
-        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        if (!audio.size) return;
-        setIsTranscribing(true);
-        try {
-          const transcript = await transcribeAudio(audio);
-          if (transcript) onSendMessageRef.current(transcript);
-        } catch (error) {
-          setMicError(error instanceof Error ? error.message : "Voice transcription failed. Please type your message.");
-        } finally {
-          setIsTranscribing(false);
-        }
-      };
-      recorder.start();
-      setIsListening(true);
-    } catch (error) {
-      setIsListening(false);
-      setMicError(error instanceof DOMException && error.name === "NotAllowedError"
-        ? "Microphone access was blocked. Allow microphone access and try again."
-        : "Could not access the microphone. Please type your message instead.");
-    }
-  }, [startListening]);
-
   const toggleListening = () => {
     if (isListening) {
-      if (recorderRef.current) {
-        stopRecording();
-      } else {
-        speechController.stopListening();
-      }
-      setIsListening(false);
-      setInterim("");
+      speechController.stopListening();
     } else {
       setMicError(null);
-      void startRecording();
+      setIsListening(true);
+      startListening();
     }
   };
 
@@ -127,7 +75,9 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
     setText("");
   };
 
-  const displayText = isListening && interim ? interim : text;
+  const displayText = interim
+    ? `${text}${text ? " " : ""}${interim}`
+    : text;
 
   return (
     <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#091525]/95 px-4 py-4 backdrop-blur-xl">
@@ -153,13 +103,13 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
             isListening
               ? "bg-red-500 hover:bg-red-600 animate-pulse"
-              : speechController.recognitionSupported
+              : voiceSupported
               ? "bg-slate-800 hover:bg-slate-700 text-slate-300"
               : "bg-slate-800 text-slate-500 hover:bg-slate-700"
           }`}
           aria-label={isListening ? "Stop listening" : "Start voice input"}
           title={
-            speechController.recognitionSupported
+            voiceSupported
               ? isListening
                 ? "Stop listening"
                 : "Speak"
@@ -178,11 +128,11 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
             placeholder={
               isListening
                 ? "Listening…"
-                : speechController.recognitionSupported
+                : voiceSupported
                 ? "Type or speak your message…"
                 : "Type your message…"
             }
-            disabled={(disabled || isTranscribing) && !isListening}
+            disabled={disabled && !isListening}
             aria-label="Message the Cinevea assistant"
             className="w-full rounded-xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm text-slate-100 placeholder-slate-500 transition-all focus:border-amber-300/60 focus:outline-none focus:ring-2 focus:ring-amber-300/20"
           />
@@ -217,12 +167,19 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           <Send className="w-5 h-5 text-white" />
         </button>
       </form>
-      {isTranscribing && (
-        <p className="text-xs text-cyan-300 mt-2 px-1">Transcribing your message…</p>
-      )}
-      {!speechController.recognitionSupported && typeof MediaRecorder === "undefined" && (
+      {!voiceSupported && (
         <p className="text-xs text-slate-500 mt-2 px-1">
           Voice input isn't available in this browser — you can still type to chat.
+        </p>
+      )}
+      {isListening && (
+        <p className="mt-2 px-1 text-xs text-cyan-300" role="status" aria-live="polite">
+          Listening — speak now
+        </p>
+      )}
+      {!isListening && !micError && voiceSupported && (
+        <p className="mt-2 px-1 text-xs text-slate-500">
+          Press the microphone, then speak.
         </p>
       )}
     </div>

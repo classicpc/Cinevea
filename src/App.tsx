@@ -20,6 +20,7 @@ import {
 import { AuthScreen } from "@/components/AuthScreen";
 import { Header } from "@/components/Header";
 import { VoiceInput } from "@/components/VoiceInput";
+import { ChatTranscript } from "@/components/ChatTranscript";
 import { useAuth } from "@/hooks/useAuth";
 import { getDates, SEAT_COLS, SEAT_ROWS, type BookingState, type Movie } from "@/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -166,11 +167,18 @@ function BookingApp() {
     setMessages((items) => [...items, { id: messageId.current, role, text }]);
   }, []);
 
-  const speak = useCallback((text: string) => {
-    if (!tts) return;
+  const speak = useCallback((text: string, force = false) => {
+    if (!tts && !force) return;
     setSpeaking(true);
     speechController.speak(text, () => setSpeaking(false));
   }, [tts]);
+
+  useEffect(() => {
+    if (!assistantOpen || !tts) {
+      speechController.stopSpeaking();
+      setSpeaking(false);
+    }
+  }, [assistantOpen, tts]);
 
   useEffect(() => {
     let active = true;
@@ -431,7 +439,12 @@ function BookingApp() {
     setSpeaking(false);
     setThinking(true);
     window.setTimeout(() => {
-      void aiRespond(trimmed, booking, []).then((response) => {
+      void aiRespond(trimmed, booking, messages.map((message) => ({
+        id: String(message.id),
+        role: message.role,
+        text: message.text,
+        timestamp: Date.now(),
+      }))).then((response) => {
       setThinking(false);
       const action = response.action;
       if (action?.type === "select_movie") {
@@ -448,7 +461,7 @@ function BookingApp() {
       }
       });
     }, 250);
-  }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, thinking, addMessage]);
+  }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, thinking, addMessage, messages]);
 
   return (
     <div className="min-h-screen bg-[#171923] text-slate-100">
@@ -486,10 +499,21 @@ function BookingApp() {
                 <div><p className="font-semibold">{thinking ? "Thinking…" : speaking ? "Speaking…" : "Ready when you are"}</p><p className="text-xs text-slate-400">Type or use the microphone</p></div>
               </div>
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-              {messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[90%] rounded-2xl px-3.5 py-3 text-sm leading-6 ${message.role === "user" ? "rounded-br-md bg-rose-500 text-white" : "rounded-bl-md bg-white/[0.07] text-slate-200"}`}>{message.text}</div></div>)}
-            </div>
-            <VoiceInput onSendMessage={sendText} disabled={thinking} ttsEnabled={tts} onToggleTts={() => setTts((value) => !value)} />
+            <ChatTranscript
+              messages={messages.map((message) => ({
+                id: String(message.id),
+                role: message.role,
+                text: message.text,
+                timestamp: Date.now(),
+              }))}
+              onSpeak={(text) => speak(text, true)}
+            />
+            <VoiceInput
+              onSendMessage={sendText}
+              disabled={thinking}
+              ttsEnabled={tts}
+              onToggleTts={() => setTts((value) => !value)}
+            />
           </aside> : <button onClick={() => setAssistantOpen(true)} className="fixed bottom-6 right-6 z-20 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-slate-400 to-rose-400 text-slate-950 shadow-xl shadow-rose-500/30 transition hover:scale-105" title="Open AI assistant" aria-label="Open AI assistant"><Sparkles className="h-6 w-6" /></button>}
           <main className="min-h-[65dvh] overflow-y-auto rounded-[clamp(1rem,2vw,1.75rem)] border border-slate-300/15 bg-[#242733]/80 p-[clamp(1rem,2vw,2rem)] shadow-2xl shadow-slate-950/40">
             {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-rose-400/40 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}

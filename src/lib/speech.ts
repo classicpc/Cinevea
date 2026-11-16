@@ -12,6 +12,7 @@ type RecognitionCallbacks = {
   onResult: (result: SpeechRecognitionResult) => void;
   onError: (error: string) => void;
   onEnd: () => void;
+  onStart?: () => void;
 };
 
 // Lazily detect the browser's SpeechRecognition constructor once
@@ -32,7 +33,7 @@ export class SpeechController {
   private listening = false;
   private gotFinalResult = false;
   private speechEndTimer: ReturnType<typeof setTimeout> | null = null;
-  private recognitionStartTimer: ReturnType<typeof setTimeout> | null = null;
+  private recognitionRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -57,8 +58,11 @@ export class SpeechController {
   }
 
   private pickVoice(): SpeechSynthesisVoice | null {
+    const canadianVoice = this.voices.find((voice) => voice.lang.toLowerCase() === "en-ca");
+    if (canadianVoice) return canadianVoice;
+
     const preferred = [
-      "Google US English",
+      "Google Canadian English",
       "Samantha",
       "Microsoft Aria",
       "Microsoft Zira",
@@ -127,7 +131,7 @@ export class SpeechController {
     return this.speaking;
   }
 
-  startListening(callbacks: RecognitionCallbacks) {
+  startListening(callbacks: RecognitionCallbacks, retryCount = 0) {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
       callbacks.onError("Speech recognition is not supported in this browser. Please type your message instead.");
@@ -153,9 +157,12 @@ export class SpeechController {
     // Create a FRESH instance every time — reusing one causes
     // immediate onend in some browsers (especially after TTS)
     this.recognition = new Ctor();
-    this.recognition.continuous = false;
+    this.recognition.continuous = true;
     this.recognition.interimResults = true;
-    this.recognition.lang = "en-US";
+    const browserLanguage = typeof navigator !== "undefined" ? navigator.language : "";
+    this.recognition.lang = browserLanguage.toLowerCase().startsWith("en")
+      ? browserLanguage
+      : "en-US";
 
     this.gotFinalResult = false;
     this.listening = true;
@@ -172,7 +179,6 @@ export class SpeechController {
         }
       }
       if (final) {
-        this.gotFinalResult = true;
         callbacks.onResult({ transcript: final.trim(), isFinal: true });
       } else if (interim) {
         callbacks.onResult({ transcript: interim.trim(), isFinal: false });
@@ -194,7 +200,15 @@ export class SpeechController {
       } else if (event.error === "audio-capture") {
         msg = "No microphone was found. Please connect a microphone or type your message below.";
       } else if (event.error === "network") {
-        msg = "There was a network problem with speech recognition. Please try again or type your message.";
+        if (retryCount === 0) {
+          this.gotFinalResult = true;
+          this.recognitionRetryTimer = setTimeout(() => {
+            this.recognitionRetryTimer = null;
+            this.startListening(callbacks, 1);
+          }, 350);
+          return;
+        }
+        msg = "Your browser's speech service is unavailable right now. Check your connection, then try again, or type your message.";
       }
       callbacks.onError(msg);
     };
@@ -202,44 +216,44 @@ export class SpeechController {
     this.recognition.onend = () => {
       this.listening = false;
       this.recognition = null;
-      // Only call onEnd if we did NOT already get a final result
-      // (onResult already handles the final case, calling onEnd there
-      // would be redundant and could cause double state updates)
       if (!this.gotFinalResult) {
         callbacks.onEnd();
       }
     };
+    this.recognition.onstart = () => {
+      callbacks.onStart?.();
+    };
 
-    // Small delay to let TTS cancel fully settle before starting recognition
-    this.recognitionStartTimer = setTimeout(() => {
-      this.recognitionStartTimer = null;
-      try {
-        this.recognition?.start();
-      } catch (err: any) {
-        // If it's already started, that's fine; otherwise report the error
-        if (err?.name !== "InvalidStateError") {
-          this.listening = false;
-          callbacks.onError("Could not start voice input. Please try again or type your message.");
-        }
+    try {
+      this.recognition.start();
+    } catch (err: any) {
+      // If it's already started, that's fine; otherwise report the error
+      if (err?.name !== "InvalidStateError") {
+        this.listening = false;
+        callbacks.onError("Could not start voice input. Please try again or type your message.");
       }
-    }, 100);
+    }
   }
 
-  stopListening() {
-    if (this.recognitionStartTimer) {
-      clearTimeout(this.recognitionStartTimer);
-      this.recognitionStartTimer = null;
+  stopListening(finalize = true) {
+    if (this.recognitionRetryTimer) {
+      clearTimeout(this.recognitionRetryTimer);
+      this.recognitionRetryTimer = null;
     }
     if (this.recognition) {
       try {
-        this.recognition.onend = null;
-        this.recognition.abort();
+        if (finalize) {
+          this.recognition.stop();
+        } else {
+          this.recognition.onend = null;
+          this.recognition.abort();
+        }
       } catch {
         // ignore
       }
-      this.recognition = null;
+      if (!finalize) this.recognition = null;
     }
-    this.listening = false;
+    if (!finalize) this.listening = false;
   }
 
   get isListening(): boolean {

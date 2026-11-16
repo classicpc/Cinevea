@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import type { ChatMessage } from "@/lib/conversation";
-import { Sparkles, User } from "lucide-react";
+import { Sparkles, User, Volume2 } from "lucide-react";
 
 interface ChatTranscriptProps {
   messages: ChatMessage[];
+  onSpeak?: (text: string) => void;
 }
 
-export function ChatTranscript({ messages }: ChatTranscriptProps) {
+export function ChatTranscript({ messages, onSpeak }: ChatTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,7 +51,18 @@ export function ChatTranscript({ messages }: ChatTranscriptProps) {
                 : "bg-gradient-to-br from-cyan-600 to-blue-600 text-white rounded-tr-sm"
             }`}
           >
-            {msg.text}
+            <span>{msg.text}</span>
+            {msg.role === "assistant" && onSpeak && (
+              <button
+                type="button"
+                onClick={() => onSpeak(msg.text)}
+                className="ml-2 inline-flex rounded p-1 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Read response aloud"
+                title="Read response aloud"
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       ))}
