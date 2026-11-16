@@ -51,13 +51,16 @@ Deno.serve(async (request) => {
     const city = String(body.city || "").trim();
     const country = String(body.country || "Canada").trim();
     const date = String(body.date || new Date().toISOString().slice(0, 10));
+    const mode = String(body.mode || "sync");
+    const filmId = Number(body.filmId);
     const requestedCinemaCount = Number(body.maxCinemas);
     const maxCinemas = Number.isFinite(requestedCinemaCount)
       ? Math.min(Math.max(Math.floor(requestedCinemaCount), 1), 25)
       : 5;
     const includePurchaseLinks = body.includePurchaseLinks === true;
 
-    if (!isOntarioBulk && (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !city)) {
+    const isDetailsMode = mode === "filmDetails" || mode === "refreshMovieDetails";
+    if (!isOntarioBulk && !isDetailsMode && (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !city)) {
       return json({ error: "latitude, longitude, and city are required." }, 400);
     }
 
@@ -82,6 +85,21 @@ Deno.serve(async (request) => {
       geolocation: `${latitude};${longitude}`,
       "device-datetime": new Date().toISOString(),
     };
+
+    if (mode === "filmDetails") {
+      if (!Number.isInteger(filmId) || filmId < 1) {
+        return json({ error: "A valid filmId is required." }, 400);
+      }
+      const details = await movieGluRequest<Record<string, unknown>>(
+        `filmDetails/?film_id=${filmId}`,
+        headers,
+      );
+      return json(details, 200);
+    }
+
+    if (mode === "refreshMovieDetails") {
+      return await refreshMovieDetails(db, headers);
+    }
 
     if (isOntarioBulk) {
       return await syncOntario(db, date, headers, maxCinemas);
@@ -220,6 +238,51 @@ Deno.serve(async (request) => {
     return json({ error: message || "MovieGlu sync failed." }, 500);
   }
 });
+
+async function refreshMovieDetails(
+  db: ReturnType<typeof createClient>,
+  headers: Record<string, string>,
+) {
+  const { data: movies, error } = await db
+    .from("movies")
+    .select("id,provider_id")
+    .eq("provider", "movieglu")
+    .not("provider_id", "is", null);
+  if (error) throw error;
+
+  let updated = 0;
+  const errors: string[] = [];
+  for (const movie of movies ?? []) {
+    try {
+      const details = await movieGluRequest<Record<string, unknown>>(
+        `filmDetails/?film_id=${encodeURIComponent(movie.provider_id)}`,
+        headers,
+      );
+      const film = (details.film as Record<string, unknown> | undefined) ?? details;
+      const ageRating = Array.isArray(film.age_rating)
+        ? String((film.age_rating[0] as { rating?: unknown })?.rating || "")
+        : String(film.age_rating || "");
+      const { error: updateError } = await db
+        .from("movies")
+        .update({
+          title: String(film.film_name || ""),
+          poster_url: film.film_image || null,
+          age_rating: ageRating || null,
+          runtime_minutes: Number(film.duration_mins || film.runtime) || null,
+          release_date: typeof film.release_date === "string" ? film.release_date : null,
+          synopsis: String(film.synopsis_long || film.synopsis || "") || null,
+          rating: Number(film.review_stars) || null,
+        })
+        .eq("id", movie.id);
+      if (updateError) throw updateError;
+      updated++;
+    } catch (error) {
+      errors.push(`${movie.provider_id}: ${error instanceof Error ? error.message : String(error)}`);
+      if (error instanceof MovieGluError && error.status === 429) break;
+    }
+  }
+  return json({ mode: "refreshMovieDetails", found: movies?.length ?? 0, updated, errors }, errors.length ? 207 : 200);
+}
 
 async function syncOntario(
   db: ReturnType<typeof createClient>,

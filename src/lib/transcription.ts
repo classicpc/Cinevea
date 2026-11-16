@@ -11,7 +11,14 @@ export async function transcribeAudio(audio: Blob): Promise<string> {
     body: form,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    const response = "context" in error && error.context instanceof Response ? error.context : null;
+    if (response) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (payload?.error) throw new Error(payload.error);
+    }
+    throw new Error(error.message);
+  }
   if (!data?.text || typeof data.text !== "string") {
     throw new Error("The transcription service returned no text.");
   }

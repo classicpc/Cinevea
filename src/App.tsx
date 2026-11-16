@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Film,
@@ -160,13 +161,14 @@ function BookingApp() {
     }
     const { data: movies, error: movieError } = await supabase
       .from("movies")
-      .select("id,title,poster_url,genre,language,runtime_minutes,age_rating,synopsis,rating")
+      .select("id,title,poster_url,genre,language,runtime_minutes,age_rating,synopsis,rating,provider_id")
       .in("id", movieIds)
       .eq("is_coming_soon", false);
     if (movieError) setCatalogError(movieError.message);
     else {
       const mapped = (movies ?? []).map((movie) => ({
         id: movie.id,
+        providerId: movie.provider_id || undefined,
         title: movie.title,
         genre: (movie.genre || "Action") as Movie["genre"],
         rating: movie.age_rating || "Not rated",
@@ -381,7 +383,8 @@ function BookingApp() {
     <div className="min-h-screen bg-[#171923] text-slate-100">
       <Header />
       <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-10">
-        <div className="mb-5 flex items-end justify-between border-b border-white/10 pb-5">
+        <div className="sticky top-[57px] z-20 mb-5 border-b border-white/10 bg-[#171923]/95 pb-3 pt-3 backdrop-blur-xl">
+          <div className="flex items-end justify-between pb-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.28em] text-rose-300">Cinevea Cinemas · Online booking</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Your next great night out.</h1>
@@ -390,10 +393,11 @@ function BookingApp() {
           <button onClick={restart} className="hidden items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:border-rose-400/40 hover:text-white sm:flex">
             Start over
           </button>
+          </div>
+          <Progress currentIndex={Math.max(0, currentIndex)} />
         </div>
-        <Progress currentIndex={Math.max(0, currentIndex)} />
         <div className={`mt-5 grid items-start gap-5 ${assistantOpen ? "lg:grid-cols-[390px_1fr]" : ""}`}>
-          {assistantOpen ? <aside className="sticky top-4 flex h-[calc(100vh-205px)] min-h-[520px] flex-col overflow-hidden rounded-[1.75rem] border border-slate-300/15 bg-[#242733] shadow-2xl shadow-slate-950/40">
+          {assistantOpen ? <aside className="sticky top-20 flex h-[calc(100vh-230px)] min-h-0 max-h-[calc(100vh-230px)] flex-col overflow-hidden rounded-[1.75rem] border border-slate-300/15 bg-[#242733] shadow-2xl shadow-slate-950/40">
             <div className="border-b border-white/10 bg-gradient-to-br from-slate-500/20 via-rose-400/10 to-transparent p-6">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-rose-300" /> Your booking concierge</span>
@@ -447,12 +451,22 @@ function MoviePicker({ movies, loading, error, onSelect, onChangeLocation }: { m
   const [query, setQuery] = useState("");
   const [genre, setGenre] = useState("All");
   const [sort, setSort] = useState("relevance");
+  const carouselRef = useRef<HTMLDivElement>(null);
   const genres = ["All", ...new Set(movies.map((movie) => movie.genre))];
   const visibleMovies = movies
     .filter((movie) => movie.title.toLowerCase().includes(query.toLowerCase()))
     .filter((movie) => genre === "All" || movie.genre === genre)
     .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : b.showtimes.length - a.showtimes.length);
-  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm text-rose-300 hover:text-white">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[1fr_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-rose-400/60" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3"><SlidersHorizontal className="h-4 w-4 text-rose-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visibleMovies.map((movie) => <button key={movie.id} onClick={() => onSelect(movie)} className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] text-left transition hover:-translate-y-1 hover:border-rose-400/50 hover:bg-white/[0.08]"><img src={movie.poster} alt="" className="h-52 w-full object-cover transition duration-500 group-hover:scale-105" /><div className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{movie.title}</h3><span className="text-xs text-rose-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-400">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>)}</div></section>;
+  const scrollCarousel = (amount: number) => carouselRef.current?.scrollBy({ left: amount, behavior: "smooth" });
+  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm text-rose-300 hover:text-white">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[1fr_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-rose-400/60" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3"><SlidersHorizontal className="h-4 w-4 text-rose-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="relative">{visibleMovies.length > 0 && <><button type="button" onClick={() => scrollCarousel(-340)} aria-label="Previous movies" className="absolute left-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800"><ChevronLeft className="h-5 w-5" /></button><button type="button" onClick={() => scrollCarousel(340)} aria-label="Next movies" className="absolute right-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800"><ChevronRight className="h-5 w-5" /></button></>}<div ref={carouselRef} className="flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-4 scrollbar-thin">{visibleMovies.map((movie) => <button key={movie.id} onClick={() => onSelect(movie)} className="group min-w-[250px] max-w-[280px] snap-start overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] text-left transition hover:-translate-y-1 hover:border-rose-400/50 hover:bg-white/[0.08] sm:min-w-[280px]"><MoviePoster src={movie.poster} title={movie.title} /><div className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{movie.title}</h3><span className="text-xs text-rose-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-400">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>)}</div></div></section>;
+}
+
+function MoviePoster({ src, title }: { src: string; title: string }) {
+  const [failed, setFailed] = useState(!src);
+  if (failed) {
+    return <div className="flex h-48 w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-700 via-slate-800 to-rose-950 px-4 text-center"><Film className="h-9 w-9 text-rose-300/80" /><span className="text-sm font-semibold text-slate-200">{title}</span><span className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Poster unavailable</span></div>;
+  }
+  return <img src={src} alt={`${title} poster`} onError={() => setFailed(true)} className="h-48 w-full object-cover transition duration-500 group-hover:scale-105" />;
 }
 
 function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates: ReturnType<typeof getDates>; selected: string | null; onSelect: (date: string) => void }) {

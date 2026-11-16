@@ -10,7 +10,7 @@ export function Header() {
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
-    <header className="flex items-center justify-between px-5 py-3 border-b border-rose-500/10 bg-slate-900/80 backdrop-blur-xl relative shadow-lg shadow-black/10">
+    <header className="sticky top-0 z-30 flex items-center justify-between px-5 py-3 border-b border-rose-500/10 bg-slate-900/95 backdrop-blur-xl relative shadow-lg shadow-black/10">
       <div className="flex items-center gap-2.5">
         <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-rose-500 to-blue-600 flex items-center justify-center shadow-lg shadow-rose-500/20">
           <Film className="w-5 h-5 text-white" />

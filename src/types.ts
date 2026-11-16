@@ -17,6 +17,7 @@ export interface Movie {
   description: string;
   showtimes: string[];
   showtimeIds?: Record<string, string>;
+  providerId?: string;
 }
 
 export interface Showtime {

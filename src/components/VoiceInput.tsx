@@ -58,6 +58,11 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
   }, []);
 
   const startRecording = useCallback(async () => {
+    if (speechController.recognitionSupported) {
+      startListening();
+      return;
+    }
+
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       startListening();
       return;
