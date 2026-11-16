@@ -2,7 +2,6 @@
 // Uses OpenAI if an API key is configured, otherwise falls back to
 // a rule-based NLU engine that fully handles the booking flow.
 
-import { OPENAI_API_KEY, OPENAI_MODEL, isAIEnabled } from "@/config";
 import {
   MOVIES,
   type Movie,
@@ -12,6 +11,7 @@ import {
   SEAT_ROWS,
   SEAT_COLS,
 } from "@/types";
+import { supabase } from "@/lib/supabase";
 
 export interface ChatMessage {
   id: string;
@@ -217,6 +217,21 @@ export function ruleBasedRespond(
 
   switch (state.step) {
     case "greeting": {
+      if (contains(text, "what else can you do", "what can you do", "help", "how does this work")) {
+        return {
+          text: "I can help you browse movies, choose a date and showtime, select the number of tickets, find recommended seats, review your booking, and confirm it. You can type or use the microphone. What would you like to do first?",
+        };
+      }
+      if (contains(text, "what movies", "movies", "list", "options", "playing", "show me")) {
+        return {
+          text: `Here are the movies currently showing:\n${listMovies()}\nYou can choose a movie by title, genre, or number.`,
+        };
+      }
+      if (contains(text, "hello", "hey", "hi", "good morning", "good afternoon", "good evening")) {
+        return {
+          text: `Hi! I can help you book movie tickets. Here are the current options:\n${listMovies()}\nWhich movie would you like to see?`,
+        };
+      }
       return {
         text: `Welcome to Cinevea! I'm your booking assistant. I can help you book movie tickets by voice or text. Which movie would you like to see? Here are the options:\n${listMovies()}`,
         action: { type: "advance", to: "movie" },
@@ -340,87 +355,33 @@ export function ruleBasedRespond(
   }
 }
 
-// ---------- OpenAI-powered engine ----------
-
-const SYSTEM_PROMPT = `You are Cinevea, a friendly and helpful movie booking assistant avatar. You guide users through booking movie tickets step by step: choosing a movie, date, showtime, number of tickets, seats, and then reviewing and confirming.
-
-You are warm, clear, and encouraging. Keep responses concise (2-4 sentences). Always confirm what the user selected before moving on.
-
-Available movies:
-${JSON.stringify(MOVIES.map((m) => ({ id: m.id, title: m.title, genre: m.genre, rating: m.rating, duration: m.duration, showtimes: m.showtimes })), null, 2)}
-
-When the user makes a selection, respond conversationally AND append a JSON action block on a new line in this exact format:
-ACTION: {"type": "...", ...}
-
-Action types:
-- select_movie: {"type":"select_movie","movieId":"m1"}
-- select_date: {"type":"select_date","date":"2026-11-14"}
-- select_showtime: {"type":"select_showtime","showtime":"6:00 PM"}
-- set_tickets: {"type":"set_tickets","count":2}
-- select_seats: {"type":"select_seats","seats":["A5","A6"]}
-- confirm_booking: {"type":"confirm_booking"}
-- go_back: {"type":"go_back"}
-- restart: {"type":"restart"}
-
-Only emit an action when the user's intent is clear. If the user is unclear, ask for clarification without an action.
-Never make up movie IDs or showtimes not in the list above.`;
-
 export async function aiRespond(
   userText: string,
   state: BookingState,
   history: ChatMessage[]
 ): Promise<AssistantResponse> {
-  if (!isAIEnabled()) {
+  if (!supabase) {
     return ruleBasedRespond(userText, state);
   }
 
   try {
-    const recentHistory = history.slice(-10).map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: m.text,
-    }));
-
-    const messages = [
-      { role: "system", content: SYSTEM_PROMPT },
-      {
-        role: "system",
-        content: `Current booking state: ${JSON.stringify({
+    const { data, error } = await supabase.functions.invoke("chat", {
+      body: {
+        userText,
+        state: {
           step: state.step,
           movie: state.movie?.title || null,
           date: state.date,
           showtime: state.showtime,
           ticketCount: state.ticketCount,
           seats: state.seats.map((s) => `${s.row}${s.col}`),
-        })}`,
+        },
+        history: history.slice(-10),
       },
-      ...recentHistory,
-      { role: "user", content: userText },
-    ];
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages,
-        temperature: 0.7,
-        max_tokens: 300,
-      }),
-      signal: controller.signal,
     });
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      throw new Error(`OpenAI API error: ${res.status}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || "I'm sorry, could you repeat that?";
+    if (error) throw error;
+    const content = data?.text;
+    if (typeof content !== "string" || !content.trim()) throw new Error("Chat function returned no response.");
 
     // Parse action from response
     const actionMatch = content.match(/ACTION:\s*({.*})/i);

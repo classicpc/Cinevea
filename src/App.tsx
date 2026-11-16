@@ -23,7 +23,7 @@ import { VoiceInput } from "@/components/VoiceInput";
 import { useAuth } from "@/hooks/useAuth";
 import { getDates, SEAT_COLS, SEAT_ROWS, type BookingState, type Movie } from "@/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { ruleBasedRespond } from "@/lib/conversation";
+import { aiRespond } from "@/lib/conversation";
 import { speechController } from "@/lib/speech";
 
 type Message = { id: number; role: "assistant" | "user"; text: string };
@@ -156,7 +156,6 @@ function BookingApp() {
   const [seatPreference, setSeatPreference] = useState<SeatPreference>("middle");
   const [recommendations, setRecommendations] = useState<SeatRecommendation[]>([]);
   const [recommendationIndex, setRecommendationIndex] = useState(0);
-  const initialized = useRef(false);
   const messageId = useRef(0);
 
   const dates = useMemo(() => getDates(), []);
@@ -172,12 +171,6 @@ function BookingApp() {
     setSpeaking(true);
     speechController.speak(text, () => setSpeaking(false));
   }, [tts]);
-
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    addMessage("assistant", "Welcome to Cinevea. Choose a movie below or type what you would like to watch.");
-  }, [addMessage]);
 
   useEffect(() => {
     let active = true;
@@ -416,7 +409,6 @@ function BookingApp() {
     setSpeaking(false);
     setBooking(initialBooking);
     setMessages([]);
-    initialized.current = false;
     setBookingRef("");
   }, []);
 
@@ -439,7 +431,7 @@ function BookingApp() {
     setSpeaking(false);
     setThinking(true);
     window.setTimeout(() => {
-      const response = ruleBasedRespond(trimmed, booking);
+      void aiRespond(trimmed, booking, []).then((response) => {
       setThinking(false);
       const action = response.action;
       if (action?.type === "select_movie") {
@@ -454,6 +446,7 @@ function BookingApp() {
       } else {
         announce(response.text);
       }
+      });
     }, 250);
   }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, thinking, addMessage]);
 

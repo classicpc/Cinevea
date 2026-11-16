@@ -453,7 +453,8 @@ async function movieGluRequest<T>(
   headers: Record<string, string>,
   allowNoContent = false,
 ): Promise<T> {
-  const response = await fetch(`https://api-gate2.movieglu.com/${path}`, { headers });
+  const baseUrl = Deno.env.get("MOVIEGLU_BASE_URL") || "https://api-gate2.movieglu.com";
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/${path}`, { headers });
   if (response.status === 204 && allowNoContent) return {} as T;
   const raw = await response.text();
   let payload: T & { status?: { message?: string } };
@@ -461,7 +462,7 @@ async function movieGluRequest<T>(
     payload = JSON.parse(raw);
   } catch {
     throw new MovieGluError(
-      `MovieGlu returned HTTP ${response.status} with a non-JSON response.`,
+      `MovieGlu returned HTTP ${response.status}: ${raw.slice(0, 300) || "empty response"}`,
       response.status,
     );
   }
