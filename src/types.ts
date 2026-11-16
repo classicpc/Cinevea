@@ -16,6 +16,7 @@ export interface Movie {
   poster: string;
   description: string;
   showtimes: string[];
+  showtimeIds?: Record<string, string>;
 }
 
 export interface Showtime {
@@ -134,6 +135,8 @@ export interface BookingState {
   movie: Movie | null;
   date: string | null;
   showtime: string | null;
+  showtimeId?: string | null;
+  holdToken?: string | null;
   ticketCount: number;
   seats: Seat[];
   step: BookingStep;

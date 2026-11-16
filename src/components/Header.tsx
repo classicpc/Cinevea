@@ -10,9 +10,9 @@ export function Header() {
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
-    <header className="flex items-center justify-between px-5 py-3 border-b border-cyan-500/10 bg-slate-900/80 backdrop-blur-xl relative shadow-lg shadow-black/10">
+    <header className="flex items-center justify-between px-5 py-3 border-b border-rose-500/10 bg-slate-900/80 backdrop-blur-xl relative shadow-lg shadow-black/10">
       <div className="flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-rose-500 to-blue-600 flex items-center justify-center shadow-lg shadow-rose-500/20">
           <Film className="w-5 h-5 text-white" />
         </div>
         <div>
@@ -31,7 +31,7 @@ export function Header() {
             onClick={() => setMenuOpen(!menuOpen)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-all"
           >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-xs font-bold text-white">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-500 to-blue-600 flex items-center justify-center text-xs font-bold text-white">
               {initials}
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
