@@ -31,6 +31,8 @@ export class SpeechController {
   private speaking = false;
   private listening = false;
   private gotFinalResult = false;
+  private speechEndTimer: ReturnType<typeof setTimeout> | null = null;
+  private recognitionStartTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -75,6 +77,10 @@ export class SpeechController {
       onEnd?.();
       return;
     }
+    if (this.speechEndTimer) {
+      clearTimeout(this.speechEndTimer);
+      this.speechEndTimer = null;
+    }
     this.synth.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = this.pickVoice();
@@ -89,19 +95,31 @@ export class SpeechController {
     };
     utterance.onend = () => {
       this.speaking = false;
+      this.speechEndTimer = null;
       onEnd?.();
     };
     utterance.onerror = () => {
       this.speaking = false;
+      this.speechEndTimer = null;
       onEnd?.();
     };
     this.synth.speak(utterance);
+    // Some browsers do not fire onend reliably when speech is interrupted.
+    this.speechEndTimer = setTimeout(() => {
+      this.speaking = false;
+      this.speechEndTimer = null;
+      onEnd?.();
+    }, Math.max(2500, text.length * 35));
   }
 
   stopSpeaking() {
     if (this.synth) {
       this.synth.cancel();
       this.speaking = false;
+    }
+    if (this.speechEndTimer) {
+      clearTimeout(this.speechEndTimer);
+      this.speechEndTimer = null;
     }
   }
 
@@ -166,6 +184,8 @@ export class SpeechController {
         // User stopped manually, or we aborted — don't show an error
         return;
       }
+      this.listening = false;
+      this.recognition = null;
       let msg = "Sorry, I didn't catch that. Could you try again?";
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         msg = "Microphone access was blocked. Please allow microphone access in your browser settings and try again, or type your message below.";
@@ -181,6 +201,7 @@ export class SpeechController {
 
     this.recognition.onend = () => {
       this.listening = false;
+      this.recognition = null;
       // Only call onEnd if we did NOT already get a final result
       // (onResult already handles the final case, calling onEnd there
       // would be redundant and could cause double state updates)
@@ -190,7 +211,8 @@ export class SpeechController {
     };
 
     // Small delay to let TTS cancel fully settle before starting recognition
-    setTimeout(() => {
+    this.recognitionStartTimer = setTimeout(() => {
+      this.recognitionStartTimer = null;
       try {
         this.recognition?.start();
       } catch (err: any) {
@@ -204,6 +226,10 @@ export class SpeechController {
   }
 
   stopListening() {
+    if (this.recognitionStartTimer) {
+      clearTimeout(this.recognitionStartTimer);
+      this.recognitionStartTimer = null;
+    }
     if (this.recognition) {
       try {
         this.recognition.onend = null;

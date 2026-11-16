@@ -18,7 +18,7 @@ export function ChatTranscript({ messages }: ChatTranscriptProps) {
   return (
     <div
       ref={scrollRef}
-      className="flex-1 overflow-y-auto px-4 py-4 space-y-3 scroll-smooth"
+      className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-3 scroll-smooth"
     >
       {messages.length === 0 && (
         <div className="text-center text-slate-500 text-sm mt-8">

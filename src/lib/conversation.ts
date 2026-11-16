@@ -397,6 +397,8 @@ export async function aiRespond(
       { role: "user", content: userText },
     ];
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -409,7 +411,9 @@ export async function aiRespond(
         temperature: 0.7,
         max_tokens: 300,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     if (!res.ok) {
       throw new Error(`OpenAI API error: ${res.status}`);

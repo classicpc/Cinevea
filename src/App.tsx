@@ -1,497 +1,431 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Header } from "@/components/Header";
-import { ProgressBar } from "@/components/ProgressBar";
-import { Avatar } from "@/components/Avatar";
-import { ChatTranscript } from "@/components/ChatTranscript";
-import { VoiceInput } from "@/components/VoiceInput";
-import { MovieGrid } from "@/components/MovieGrid";
-import { DateShowtimePanel } from "@/components/DateShowtimePanel";
-import { SeatMap } from "@/components/SeatMap";
-import { BookingSummary, Confirmation } from "@/components/BookingSummary";
-import { Landing } from "@/components/Landing";
-import { AuthScreen } from "@/components/AuthScreen";
-import { useAuth } from "@/hooks/useAuth";
-import { useBooking } from "@/hooks/useBooking";
-import { speechController } from "@/lib/speech";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  aiRespond,
-  ruleBasedRespond,
-  type ChatMessage,
-  type AssistantResponse,
-} from "@/lib/conversation";
-import { isAIEnabled } from "@/config";
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Clock3,
+  Film,
+  Loader2,
+  Mic2,
+  Minimize2,
+  ArrowLeft,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Ticket,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { AuthScreen } from "@/components/AuthScreen";
+import { Header } from "@/components/Header";
+import { VoiceInput } from "@/components/VoiceInput";
+import { useAuth } from "@/hooks/useAuth";
+import { getDates, SEAT_COLS, SEAT_ROWS, type BookingState, type Movie } from "@/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { Info, Loader2 } from "lucide-react";
+import { ruleBasedRespond } from "@/lib/conversation";
+import { speechController } from "@/lib/speech";
 
-let msgId = 0;
-function newId(): string {
-  msgId += 1;
-  return `msg-${msgId}`;
-}
+type Message = { id: number; role: "assistant" | "user"; text: string };
+const steps = ["movie", "date", "showtime", "tickets", "seats", "review", "confirmed"] as const;
+
+const initialBooking: BookingState = {
+  movie: null,
+  date: null,
+  showtime: null,
+  ticketCount: 0,
+  seats: [],
+  step: "greeting",
+};
 
 function App() {
   const { session, loading } = useAuth();
 
-  if (!isSupabaseConfigured) {
-    return <SetupScreen />;
-  }
-
+  if (!isSupabaseConfigured) return <SetupScreen />;
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-      </div>
-    );
+    return <div className="min-h-screen bg-slate-950 grid place-items-center"><Loader2 className="animate-spin text-cyan-400" /></div>;
   }
-
-  if (!session) {
-    return <AuthScreen />;
-  }
-
-  return <CineveaApp />;
+  return session ? <BookingApp /> : <AuthScreen />;
 }
 
 function SetupScreen() {
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-100">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
-        <h1 className="text-xl font-semibold">Cinevea setup required</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-400">
-          The app is missing its Supabase connection settings, so it cannot load
-          authentication. Add these variables to the deployment environment and
-          reload the page:
-        </p>
-        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-950 p-4 text-sm text-cyan-300">
-{`VITE_SUPABASE_URL=...
-VITE_SUPABASE_ANON_KEY=...
+    <main className="min-h-screen bg-slate-950 text-white grid place-items-center p-6">
+      <section className="max-w-lg rounded-3xl border border-white/10 bg-white/[0.05] p-8 shadow-2xl">
+        <div className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-cyan-500"><Film /></div>
+        <h1 className="text-2xl font-bold">Cinevea setup required</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-400">Add your Supabase connection settings to <code>.env.local</code>, then reload the app.</p>
+        <pre className="mt-5 rounded-2xl bg-slate-950 p-4 text-xs text-cyan-300">{`VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...`}</pre>
+      </section>
+    </main>
+  );
+}
 
-or
+function BookingApp() {
+  const [booking, setBooking] = useState<BookingState>(initialBooking);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [thinking, setThinking] = useState(false);
+  const [tts, setTts] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [bookingRef, setBookingRef] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [locations, setLocations] = useState<Array<{ id: string; name: string; city: string; country: string }>>([]);
+  const [locationId, setLocationId] = useState("");
+  const [catalogMovies, setCatalogMovies] = useState<Movie[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(true);
+  const initialized = useRef(false);
+  const messageId = useRef(0);
 
-NEXT_PUBLIC_SUPABASE_URL=...
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...`}
-        </pre>
-        <p className="mt-4 text-xs text-slate-500">
-          For local development, put them in a <code>.env.local</code> file at
-          the project root.
-        </p>
+  const dates = useMemo(() => getDates(), []);
+  const currentIndex = steps.indexOf(booking.step as (typeof steps)[number]);
+
+  const addMessage = useCallback((role: Message["role"], text: string) => {
+    messageId.current += 1;
+    setMessages((items) => [...items, { id: messageId.current, role, text }]);
+  }, []);
+
+  const speak = useCallback((text: string) => {
+    if (!tts) return;
+    setSpeaking(true);
+    speechController.speak(text, () => setSpeaking(false));
+  }, [tts]);
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    addMessage("assistant", "Welcome to Cinevea. Choose a movie below or type what you would like to watch.");
+  }, [addMessage]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadLocations() {
+      if (!supabase) return;
+      const { data, error } = await supabase.from("locations").select("id,name,city,country").order("city");
+      if (!active) return;
+      if (error) setCatalogError(error.message);
+      else setLocations(data ?? []);
+      setCatalogLoading(false);
+    }
+    void loadLocations();
+    return () => { active = false; };
+  }, []);
+
+  const chooseLocation = useCallback(async (id: string) => {
+    if (!supabase) return;
+    setLocationId(id);
+    window.sessionStorage.setItem("cinevea-location", id);
+    setCatalogLoading(true);
+    setCatalogError(null);
+    setCatalogMovies([]);
+    const { data: theatres, error: theatreError } = await supabase
+      .from("theatres")
+      .select("id")
+      .eq("location_id", id);
+    if (theatreError) {
+      setCatalogError(theatreError.message);
+      setCatalogLoading(false);
+      return;
+    }
+    const theatreIds = (theatres ?? []).map((theatre) => theatre.id);
+    const { data: auditoriums, error: auditoriumError } = await supabase
+      .from("auditoriums")
+      .select("id")
+      .in("theatre_id", theatreIds.length ? theatreIds : ["00000000-0000-0000-0000-000000000000"]);
+    if (auditoriumError) {
+      setCatalogError(auditoriumError.message);
+      setCatalogLoading(false);
+      return;
+    }
+    const auditoriumIds = (auditoriums ?? []).map((auditorium) => auditorium.id);
+    const { data: showtimes, error: showtimeError } = await supabase
+      .from("showtimes")
+      .select("id,movie_id,starts_at")
+      .in("auditorium_id", auditoriumIds.length ? auditoriumIds : ["00000000-0000-0000-0000-000000000000"])
+      .gt("starts_at", new Date().toISOString())
+      .order("starts_at");
+    if (showtimeError) {
+      setCatalogError(showtimeError.message);
+      setCatalogLoading(false);
+      return;
+    }
+    const movieIds = [...new Set((showtimes ?? []).map((showtime) => showtime.movie_id))];
+    if (!movieIds.length) {
+      setCatalogLoading(false);
+      return;
+    }
+    const { data: movies, error: movieError } = await supabase
+      .from("movies")
+      .select("id,title,poster_url,genre,language,runtime_minutes,age_rating,synopsis,rating")
+      .in("id", movieIds)
+      .eq("is_coming_soon", false);
+    if (movieError) setCatalogError(movieError.message);
+    else {
+      const mapped = (movies ?? []).map((movie) => ({
+        id: movie.id,
+        title: movie.title,
+        genre: (movie.genre || "Action") as Movie["genre"],
+        rating: movie.age_rating || "Not rated",
+        duration: movie.runtime_minutes || 0,
+        poster: movie.poster_url || "",
+        description: movie.synopsis || "Details unavailable.",
+        showtimes: (showtimes ?? [])
+          .filter((showtime) => showtime.movie_id === movie.id)
+          .map((showtime) => new Date(showtime.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+      }));
+      setCatalogMovies(mapped);
+    }
+    setCatalogLoading(false);
+  }, []);
+
+  const announce = useCallback((text: string) => {
+    addMessage("assistant", text);
+    speak(text);
+  }, [addMessage, speak]);
+
+  const chooseMovie = useCallback((movie: Movie) => {
+    setBooking((state) => ({ ...state, movie, date: null, showtime: null, ticketCount: 0, seats: [], step: "date" }));
+    announce(`${movie.title} selected. Choose a date to see available showtimes.`);
+  }, [announce]);
+
+  const chooseDate = useCallback((date: string) => {
+    setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, seats: [], step: "showtime" }));
+    const formatted = dates.find((item) => item.value === date)?.label ?? date;
+    announce(`Showtimes for ${formatted} are now available. Choose a time.`);
+  }, [announce, dates]);
+
+  const chooseShowtime = useCallback((showtime: string) => {
+    setBooking((state) => ({ ...state, showtime, ticketCount: 0, seats: [], step: "tickets" }));
+    announce(`${showtime} selected. How many tickets do you need?`);
+  }, [announce]);
+
+  const chooseTickets = useCallback((count: number) => {
+    setBooking((state) => ({ ...state, ticketCount: count, seats: [], step: "seats" }));
+    announce(`${count} ticket${count === 1 ? "" : "s"} selected. Choose your seats.`);
+  }, [announce]);
+
+  const toggleSeat = useCallback((row: string, col: number) => {
+    setBooking((state) => {
+      if (state.step !== "seats") return state;
+      const exists = state.seats.some((seat) => seat.row === row && seat.col === col);
+      const seats = exists
+        ? state.seats.filter((seat) => !(seat.row === row && seat.col === col))
+        : state.seats.length < state.ticketCount
+          ? [...state.seats, { row, col, status: "selected" as const }]
+          : state.seats;
+      return { ...state, seats };
+    });
+  }, []);
+
+  const recommendSeats = useCallback(() => {
+    if (booking.ticketCount < 1) return;
+    const preferredRows = ["D", "E", "C", "F", "B", "G", "A", "H"];
+    const start = Math.floor((SEAT_COLS - booking.ticketCount) / 2) + 1;
+    const row = preferredRows[0];
+    setBooking((state) => ({
+      ...state,
+      seats: Array.from({ length: state.ticketCount }, (_, index) => ({
+        row,
+        col: start + index,
+        status: "selected" as const,
+      })),
+    }));
+    announce(`I selected ${booking.ticketCount} centered seats in row ${row}. You can adjust them manually.`);
+  }, [announce, booking.ticketCount]);
+
+  const review = useCallback(() => {
+    if (booking.seats.length !== booking.ticketCount) return;
+    setBooking((state) => ({ ...state, step: "review" }));
+    announce("Your seats are selected. Review your booking before confirming.");
+  }, [announce, booking.seats.length, booking.ticketCount]);
+
+  const confirm = useCallback(async () => {
+    if (!booking.movie || !booking.date || !booking.showtime || booking.ticketCount < 1) return;
+    if (!supabase) {
+      announce("I could not save this booking because Supabase is not configured.");
+      return;
+    }
+
+    const reference = `CV-${Date.now().toString(36).slice(-7).toUpperCase()}`;
+    setSaving(true);
+    const { error } = await supabase.from("bookings").insert({
+      booking_ref: reference,
+      movie_title: booking.movie.title,
+      movie_genre: booking.movie.genre,
+      movie_rating: booking.movie.rating,
+      show_date: booking.date,
+      showtime: booking.showtime,
+      ticket_count: booking.ticketCount,
+      seats: booking.seats.map((seat) => `${seat.row}${seat.col}`),
+      total_price: booking.ticketCount * 14.99,
+    });
+    setSaving(false);
+
+    if (error) {
+      announce(`I could not save the booking: ${error.message}`);
+      return;
+    }
+
+    setBooking((state) => ({ ...state, step: "confirmed" }));
+    setBookingRef(reference);
+    announce(`Booking confirmed. Your reference is ${reference}. Enjoy the show!`);
+  }, [announce, booking]);
+
+  const restart = useCallback(() => {
+    speechController.stopSpeaking();
+    setSpeaking(false);
+    setBooking(initialBooking);
+    setMessages([]);
+    initialized.current = false;
+    setBookingRef("");
+  }, []);
+
+  const goBack = useCallback(() => {
+    setBooking((state) => {
+      if (state.step === "review") return { ...state, step: "seats" };
+      if (state.step === "seats") return { ...state, step: "tickets", seats: [] };
+      if (state.step === "tickets") return { ...state, step: "showtime", ticketCount: 0 };
+      if (state.step === "showtime") return { ...state, step: "date", showtime: null };
+      if (state.step === "date") return { ...state, step: "greeting", movie: null, date: null };
+      return state;
+    });
+  }, []);
+
+  const sendText = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || thinking) return;
+    addMessage("user", trimmed);
+    speechController.stopSpeaking();
+    setSpeaking(false);
+    setThinking(true);
+    window.setTimeout(() => {
+      const response = ruleBasedRespond(trimmed, booking);
+      setThinking(false);
+      const action = response.action;
+      if (action?.type === "select_movie") {
+        const movie = catalogMovies.find((item) => item.id === action.movieId);
+        if (movie) chooseMovie(movie);
+      } else if (action?.type === "select_date") {
+        chooseDate(action.date);
+      } else if (action?.type === "select_showtime") {
+        chooseShowtime(action.showtime);
+      } else if (action?.type === "set_tickets") {
+        chooseTickets(action.count);
+      } else {
+        announce(response.text);
+      }
+    }, 250);
+  }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, thinking, addMessage]);
+
+  return (
+    <div className="min-h-screen bg-[#07111f] text-slate-100">
+      <Header />
+      <div className="mx-auto max-w-[1440px] px-4 py-5 sm:px-6 lg:px-10">
+        <div className="mb-5 flex items-end justify-between border-b border-white/10 pb-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-amber-300">Cinevea Cinemas · Online booking</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Your next great night out.</h1>
+            <p className="mt-2 max-w-xl text-sm text-slate-400">Reserve seats in seconds, with a personal assistant to guide every step.</p>
+          </div>
+          <button onClick={restart} className="hidden items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:border-cyan-400/40 hover:text-white sm:flex">
+            Start over
+          </button>
+        </div>
+        <Progress currentIndex={Math.max(0, currentIndex)} />
+        <div className={`mt-5 grid items-start gap-5 ${assistantOpen ? "lg:grid-cols-[390px_1fr]" : ""}`}>
+          {assistantOpen ? <aside className="sticky top-4 flex h-[calc(100vh-205px)] min-h-[520px] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0b1a2c] shadow-2xl shadow-black/30">
+            <div className="border-b border-white/10 bg-gradient-to-br from-amber-400/10 via-cyan-400/5 to-transparent p-6">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-amber-300" /> Your booking concierge</span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setTts((value) => !value)} className={`rounded-lg p-2 ${tts ? "bg-cyan-500/20 text-cyan-300" : "bg-white/5 text-slate-500"}`} title="Toggle spoken responses">
+                    {tts ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                  </button>
+                  <button onClick={() => setAssistantOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white" title="Minimize assistant" aria-label="Minimize assistant">
+                    <Minimize2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center gap-3">
+                <div className={`grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-lg shadow-orange-500/20 ${speaking ? "animate-pulse" : ""}`}><Mic2 className="h-6 w-6" /></div>
+                <div><p className="font-semibold">{thinking ? "Thinking…" : speaking ? "Speaking…" : "Ready when you are"}</p><p className="text-xs text-slate-400">Type or use the microphone</p></div>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+              {messages.map((message) => <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[90%] rounded-2xl px-3.5 py-3 text-sm leading-6 ${message.role === "user" ? "rounded-br-md bg-cyan-500 text-white" : "rounded-bl-md bg-white/[0.07] text-slate-200"}`}>{message.text}</div></div>)}
+            </div>
+            <VoiceInput onSendMessage={sendText} disabled={thinking} ttsEnabled={tts} onToggleTts={() => setTts((value) => !value)} />
+          </aside> : <button onClick={() => setAssistantOpen(true)} className="fixed bottom-6 right-6 z-20 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-xl shadow-orange-500/30 transition hover:scale-105" title="Open AI assistant" aria-label="Open AI assistant"><Sparkles className="h-6 w-6" /></button>}
+          <main className="min-h-[620px] overflow-y-auto rounded-[1.75rem] border border-white/10 bg-[#0b1a2c]/80 p-5 shadow-2xl shadow-black/20 sm:p-8">
+            {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-cyan-400/40 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}
+            {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
+            {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={() => { setLocationId(""); setCatalogMovies([]); }} />}
+            {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
+            {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} onSelect={chooseShowtime} />}
+            {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
+            {booking.step === "seats" && <SeatPicker booking={booking} onToggle={toggleSeat} onRecommend={recommendSeats} onConfirm={review} />}
+            {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
+            {booking.step === "confirmed" && <Confirmation reference={bookingRef} onRestart={restart} />}
+          </main>
+        </div>
       </div>
     </div>
   );
 }
 
-function CineveaApp() {
-  const booking = useBooking();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [bookingId, setBookingId] = useState("");
-  const [showInfo, setShowInfo] = useState(false);
-  const thinkingRef = useRef(false);
-  const greetingSent = useRef(false);
-  const hasInteracted = useRef(false);
+function Progress({ currentIndex }: { currentIndex: number }) {
+  return <div className="flex items-center gap-1 overflow-x-auto pb-1">{["Movie", "Date", "Time", "Tickets", "Seats", "Review", "Done"].map((label, index) => <div key={label} className="flex min-w-[78px] flex-1 items-center gap-1">{<div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold ${index < currentIndex ? "bg-emerald-500 text-white" : index === currentIndex ? "bg-cyan-500 text-white ring-4 ring-cyan-500/15" : "bg-white/10 text-slate-500"}`}>{index < currentIndex ? <Check className="h-4 w-4" /> : index + 1}</div>}<span className={`hidden text-xs sm:block ${index === currentIndex ? "font-semibold text-cyan-300" : "text-slate-500"}`}>{label}</span>{index < 6 && <div className={`h-px flex-1 ${index < currentIndex ? "bg-emerald-500" : "bg-white/10"}`} />}</div>)}</div>;
+}
 
-  const speak = useCallback(
-    (text: string) => {
-      if (!ttsEnabled) return;
-      // Don't auto-speak until the user has interacted with the page at least once.
-      // Browsers can block audio before a user gesture, and TTS interferes with
-      // speech recognition startup if it hasn't fully settled.
-      if (!hasInteracted.current) return;
-      setIsSpeaking(true);
-      speechController.speak(text, () => {
-        setIsSpeaking(false);
-      });
-    },
-    [ttsEnabled]
-  );
+function LocationPicker({ locations, loading, error, onSelect }: { locations: Array<{ id: string; name: string; city: string; country: string }>; loading: boolean; error: string | null; onSelect: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const matches = locations.filter((location) => `${location.name} ${location.city} ${location.country}`.toLowerCase().includes(query.toLowerCase()));
+  return <section className="mx-auto max-w-3xl"><SectionTitle eyebrow="Start here" title="Choose your location" icon={<CalendarDays />} /><p className="mb-5 text-sm text-slate-400">Search a city to see its live movies, theatres, and showtimes.</p><label className="relative mb-5 block"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Ontario locations…" aria-label="Search locations" className="w-full rounded-2xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/60" /></label>{loading && <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading locations…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !locations.length && <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5 text-sm text-amber-100">No live locations have been imported yet.</div>}{!loading && !error && locations.length > 0 && !matches.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400">No matching locations.</div>}<div className="grid gap-3 sm:grid-cols-2">{matches.map((location) => <button key={location.id} onClick={() => onSelect(location.id)} className="rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left transition hover:border-cyan-400/50 hover:bg-cyan-400/10"><p className="font-semibold">{location.name}</p><p className="mt-1 text-sm text-slate-400">{location.city}, {location.country}</p></button>)}</div></section>;
+}
 
-  // Send greeting on first load (text only — voice kicks in after first interaction)
-  useEffect(() => {
-    if (greetingSent.current) return;
-    greetingSent.current = true;
-    const msg: ChatMessage = {
-      id: newId(),
-      role: "assistant",
-      text: "Welcome to Cinevea! I'm your movie booking assistant. I can help you book tickets by voice or text. Tap the microphone to speak, or type your message below. To get started, would you like to see what movies are showing?",
-      timestamp: Date.now(),
-    };
-    setMessages([msg]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function MoviePicker({ movies, loading, error, onSelect, onChangeLocation }: { movies: Movie[]; loading: boolean; error: string | null; onSelect: (movie: Movie) => void; onChangeLocation: () => void }) {
+  const [query, setQuery] = useState("");
+  const [genre, setGenre] = useState("All");
+  const [sort, setSort] = useState("relevance");
+  const genres = ["All", ...new Set(movies.map((movie) => movie.genre))];
+  const visibleMovies = movies
+    .filter((movie) => movie.title.toLowerCase().includes(query.toLowerCase()))
+    .filter((movie) => genre === "All" || movie.genre === genre)
+    .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : b.showtimes.length - a.showtimes.length);
+  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm text-cyan-300 hover:text-white">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[1fr_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400/60" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3"><SlidersHorizontal className="h-4 w-4 text-cyan-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{visibleMovies.map((movie) => <button key={movie.id} onClick={() => onSelect(movie)} className="group overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] text-left transition hover:-translate-y-1 hover:border-cyan-400/50 hover:bg-white/[0.08]"><img src={movie.poster} alt="" className="h-52 w-full object-cover transition duration-500 group-hover:scale-105" /><div className="p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{movie.title}</h3><span className="text-xs text-cyan-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-400">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>)}</div></section>;
+}
 
-  const addAssistantMessage = useCallback(
-    (response: AssistantResponse) => {
-      const msg: ChatMessage = {
-        id: newId(),
-        role: "assistant",
-        text: response.text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-      speak(response.text);
+function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates: ReturnType<typeof getDates>; selected: string | null; onSelect: (date: string) => void }) {
+  return <section><SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{dates.map((date, index) => <button type="button" key={date.value} onClick={() => onSelect(date.value)} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${selected === date.value ? "border-cyan-400 bg-cyan-500/20 text-white shadow-lg shadow-cyan-500/10" : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-cyan-400/40"}`}><p className="text-xs text-slate-500">{index === 0 ? "Today" : index === 1 ? "Tomorrow" : date.weekday}</p><p className="mt-2 font-bold">{date.label}</p></button>)}</div></section>;
+}
 
-      if (response.action) {
-        const action = response.action;
-        setTimeout(() => {
-          if (action.type === "confirm_booking") {
-            setBookingId("CV-" + Date.now().toString(36).toUpperCase().slice(-8));
-          }
-          booking.applyAction(action);
-        }, 600);
-      }
-    },
-    [speak, booking]
-  );
+function ShowtimePicker({ movie, onSelect }: { movie: Movie; onSelect: (time: string) => void }) {
+  return <section><SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{movie.showtimes.map((time) => <button key={time} onClick={() => onSelect(time)} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-cyan-400/50 hover:bg-cyan-500/10"><span>{time}</span><ChevronRight className="h-4 w-4 text-cyan-300" /></button>)}</div></section>;
+}
 
-  const handleSendMessage = useCallback(
-    async (text: string) => {
-      hasInteracted.current = true;
-      const userMsg: ChatMessage = {
-        id: newId(),
-        role: "user",
-        text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
+function TicketPicker({ onSelect }: { onSelect: (count: number) => void }) {
+  return <section><SectionTitle eyebrow="Step 04" title="How many tickets?" icon={<Ticket />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-5">{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <button key={count} onClick={() => onSelect(count)} className="rounded-2xl border border-white/10 bg-white/[0.045] p-6 text-2xl font-bold transition hover:border-cyan-400/50 hover:bg-cyan-500/10">{count}</button>)}</div></section>;
+}
 
-      speechController.stopSpeaking();
-      setIsSpeaking(false);
+function SeatPicker({ booking, onToggle, onRecommend, onConfirm }: { booking: BookingState; onToggle: (row: string, col: number) => void; onRecommend: () => void; onConfirm: () => void }) {
+  return <section><SectionTitle eyebrow="Step 05" title="Choose your seats" icon={<Ticket />} /><div className="mb-5 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 p-4 text-center"><div className="mx-auto max-w-xl rounded-[50%] border-2 border-cyan-300/80 bg-cyan-300/20 py-2 text-xs font-bold uppercase tracking-[0.45em] text-cyan-100 shadow-[0_8px_30px_rgba(34,211,238,0.2)]">Screen</div><p className="mt-2 text-xs text-cyan-200/70">Rows A–C are closest · Rows D–F are the recommended viewing area</p></div><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-400">Select {booking.ticketCount} adjacent seats, or let Cinevea choose the best centered seats.</p><button type="button" onClick={onRecommend} className="inline-flex items-center gap-2 rounded-xl border border-amber-300/40 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/20"><Sparkles className="h-4 w-4" /> Recommend seats</button></div><div className="mx-auto max-w-2xl space-y-2 overflow-x-auto" aria-label="Seat map">{SEAT_ROWS.map((row) => <div key={row} className="flex min-w-[500px] items-center justify-center gap-1.5"><span className="w-5 text-xs font-semibold text-slate-500">{row}</span>{Array.from({ length: SEAT_COLS }, (_, index) => { const col = index + 1; const selected = booking.seats.some((seat) => seat.row === row && seat.col === col); return <button type="button" key={col} aria-label={`Row ${row}, seat ${col}${selected ? ", selected" : ""}`} onClick={() => onToggle(row, col)} className={`h-8 w-8 rounded-lg text-xs transition hover:scale-105 ${selected ? "bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-400/30" : "bg-white/10 text-slate-400 hover:bg-white/20"}`}>{selected ? <Check className="mx-auto h-3.5 w-3.5" /> : col}</button>; })}</div>)}</div><div className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-slate-400"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-white/10" /> Available</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-cyan-400" /> Selected</span></div><button onClick={onConfirm} disabled={booking.seats.length !== booking.ticketCount} className="mx-auto mt-7 block rounded-2xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500">{booking.seats.length === booking.ticketCount ? "Review booking" : `Choose ${booking.ticketCount - booking.seats.length} more`}</button></section>;
+}
 
-      setIsThinking(true);
-      thinkingRef.current = true;
+function Review({ booking, onConfirm, saving }: { booking: BookingState; onConfirm: () => void; saving: boolean }) {
+  return <section className="mx-auto max-w-xl"><SectionTitle eyebrow="Step 06" title="Review your booking" icon={<Ticket />} /><div className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.045] p-6 text-sm"><SummaryRow label="Movie" value={booking.movie?.title ?? ""} /><SummaryRow label="Date" value={booking.date ?? ""} /><SummaryRow label="Showtime" value={booking.showtime ?? ""} /><SummaryRow label="Tickets" value={String(booking.ticketCount)} /><SummaryRow label="Seats" value={booking.seats.map((seat) => `${seat.row}${seat.col}`).join(", ")} /><div className="my-4 border-t border-white/10" /><SummaryRow label="Total" value={`$${(booking.ticketCount * 14.99).toFixed(2)}`} strong /></div><button onClick={onConfirm} disabled={saving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 py-3.5 font-bold text-slate-950 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60">{saving && <Loader2 className="h-4 w-4 animate-spin" />} {saving ? "Saving booking…" : "Confirm booking"}</button></section>;
+}
 
-      try {
-        let response: AssistantResponse;
-        if (isAIEnabled()) {
-          response = await aiRespond(text, booking.state, messages);
-        } else {
-          await new Promise((r) => setTimeout(r, 400));
-          response = ruleBasedRespond(text, booking.state);
-        }
-        setIsThinking(false);
-        thinkingRef.current = false;
-        addAssistantMessage(response);
-      } catch {
-        setIsThinking(false);
-        thinkingRef.current = false;
-        const fallback = ruleBasedRespond(text, booking.state);
-        addAssistantMessage(fallback);
-      }
-    },
-    [booking, messages, addAssistantMessage]
-  );
+function Confirmation({ reference, onRestart }: { reference: string; onRestart: () => void }) {
+  return <section className="mx-auto max-w-xl text-center"><div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-emerald-400 text-slate-950 shadow-xl shadow-emerald-500/20"><Check className="h-10 w-10" /></div><p className="mt-6 text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Booking confirmed</p><h2 className="mt-2 text-3xl font-bold">Enjoy the show!</h2><p className="mt-3 text-slate-400">Your confirmation number is</p><p className="mt-2 font-mono text-2xl text-cyan-300">{reference}</p><button onClick={onRestart} className="mt-8 rounded-2xl border border-white/10 px-6 py-3 font-semibold transition hover:border-cyan-400/50">Book another movie</button></section>;
+}
 
-  const handleToggleTts = useCallback(() => {
-    setTtsEnabled((prev) => {
-      const next = !prev;
-      if (!next) {
-        speechController.stopSpeaking();
-        setIsSpeaking(false);
-      }
-      return next;
-    });
-  }, []);
+function SectionTitle({ eyebrow, title, icon }: { eyebrow: string; title: string; icon: ReactNode }) {
+  return <div className="mb-6"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-400">{eyebrow}</p><h2 className="mt-2 flex items-center gap-2 text-2xl font-bold tracking-tight text-white">{<span className="text-cyan-300">{icon}</span>}{title}</h2></div>;
+}
 
-  const handleRestart = useCallback(() => {
-    booking.reset();
-    setMessages([]);
-    setBookingId("");
-    speechController.stopSpeaking();
-    setIsSpeaking(false);
-    greetingSent.current = false;
-    hasInteracted.current = true; // already interacted if they hit restart
-    setTimeout(() => {
-      greetingSent.current = true;
-      const msg: ChatMessage = {
-        id: newId(),
-        role: "assistant",
-        text: "Let's start fresh! Which movie would you like to see? You can browse the options on the right and tap one, or just tell me the title or genre.",
-        timestamp: Date.now(),
-      };
-      setMessages([msg]);
-      if (ttsEnabled) speak(msg.text);
-    }, 100);
-  }, [booking, ttsEnabled, speak]);
-
-  const handleManualMovieSelect = useCallback(
-    (movie: NonNullable<typeof booking.state.movie>) => {
-      if (!movie) return;
-      hasInteracted.current = true;
-      booking.manualSelectMovie(movie);
-      const text = `Great choice! ${movie.title} — ${movie.genre}, rated ${movie.rating}, ${movie.duration} minutes. What day would you like to see it?`;
-      const msg: ChatMessage = {
-        id: newId(),
-        role: "assistant",
-        text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-      speak(text);
-    },
-    [booking, speak]
-  );
-
-  const handleManualDateSelect = useCallback(
-    (date: string) => {
-      hasInteracted.current = true;
-      booking.manualSelectDate(date);
-      if (booking.state.movie) {
-        const text = `Got it. Here are the showtimes for ${booking.state.movie.title}: ${booking.state.movie.showtimes.join(", ")}. Which time works for you?`;
-        const msg: ChatMessage = {
-          id: newId(),
-          role: "assistant",
-          text,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, msg]);
-        speak(text);
-      }
-    },
-    [booking, speak]
-  );
-
-  const handleManualShowtimeSelect = useCallback(
-    (showtime: string) => {
-      hasInteracted.current = true;
-      booking.manualSelectShowtime(showtime);
-      const text = `Got it — ${showtime}. How many tickets would you like? You can book up to 10.`;
-      const msg: ChatMessage = {
-        id: newId(),
-        role: "assistant",
-        text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-      speak(text);
-    },
-    [booking, speak]
-  );
-
-  const handleConfirmSeats = useCallback(() => {
-    booking.confirmSeatsFromMap();
-    const seats = booking.state.seats.map((s) => `${s.row}${s.col}`).join(", ");
-    const text = `Seats ${seats} — perfect! Here's your booking summary. Would you like to confirm, or would you like to change anything?`;
-    const msg: ChatMessage = {
-      id: newId(),
-      role: "assistant",
-      text,
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, msg]);
-    speak(text);
-  }, [booking, speak]);
-
-  const handleConfirmBooking = useCallback(() => {
-    const ref = "CV-" + Date.now().toString(36).toUpperCase().slice(-8);
-    setBookingId(ref);
-    booking.applyAction({ type: "confirm_booking" });
-
-    // Persist booking to Supabase
-    const { state: bs } = booking;
-    if (supabase && bs.movie && bs.date && bs.showtime) {
-      supabase
-        .from("bookings")
-        .insert({
-          booking_ref: ref,
-          movie_title: bs.movie.title,
-          movie_genre: bs.movie.genre,
-          movie_rating: bs.movie.rating,
-          show_date: bs.date,
-          showtime: bs.showtime,
-          ticket_count: bs.ticketCount,
-          seats: bs.seats.map((s) => `${s.row}${s.col}`),
-          total_price: bs.ticketCount * 14.99,
-        })
-        .then(({ error }) => {
-          if (error) console.error("Failed to save booking:", error.message);
-        });
-    }
-
-    const text = "Wonderful! Your booking is confirmed. Enjoy the show! Would you like to book another movie?";
-    const msg: ChatMessage = {
-      id: newId(),
-      role: "assistant",
-      text,
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, msg]);
-    speak(text);
-  }, [booking, speak]);
-
-  const handleEditStep = useCallback(
-    (step: "movie" | "date" | "showtime" | "tickets" | "seats") => {
-      const stepOrder = ["greeting", "movie", "date", "showtime", "tickets", "seats", "review", "confirmed"];
-      const targetIdx = stepOrder.indexOf(step);
-      const currentIdx = stepOrder.indexOf(booking.state.step);
-      const goBackCount = currentIdx - targetIdx;
-      for (let i = 0; i < goBackCount; i++) {
-        booking.goBack();
-      }
-      const text =
-        step === "movie"
-          ? "Sure, which movie would you like instead?"
-          : step === "date"
-          ? "No problem — which date works better?"
-          : step === "showtime"
-          ? "Which showtime would you prefer?"
-          : step === "tickets"
-          ? "How many tickets would you like?"
-          : "Which seats would you like instead?";
-      const msg: ChatMessage = {
-        id: newId(),
-        role: "assistant",
-        text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, msg]);
-      speak(text);
-    },
-    [booking, speak]
-  );
-
-  const { state } = booking;
-
-  const renderPanel = () => {
-    switch (state.step) {
-      case "greeting":
-        return <Landing onSelectMovie={handleManualMovieSelect} />;
-      case "movie":
-        return (
-          <MovieGrid
-            selectedMovieId={state.movie?.id || null}
-            onSelect={handleManualMovieSelect}
-          />
-        );
-      case "date":
-      case "showtime":
-        return state.movie ? (
-          <DateShowtimePanel
-            movie={state.movie}
-            selectedDate={state.date}
-            selectedShowtime={state.showtime}
-            onSelectDate={handleManualDateSelect}
-            onSelectShowtime={handleManualShowtimeSelect}
-          />
-        ) : null;
-      case "tickets":
-        return (
-          <div className="p-4">
-            <h2 className="text-sm font-semibold text-slate-400 mb-3">
-              How many tickets?
-            </h2>
-            <div className="grid grid-cols-5 gap-2">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => {
-                    booking.manualSetTickets(n);
-                    const text = `${n} ticket${n > 1 ? "s" : ""} — got it! Now let's pick your seats. The theater has rows A through H. You can say seat numbers like "A5" or "B3 and B4", or tap seats on the map.`;
-                    const msg: ChatMessage = {
-                      id: newId(),
-                      role: "assistant",
-                      text,
-                      timestamp: Date.now(),
-                    };
-                    setMessages((prev) => [...prev, msg]);
-                    speak(text);
-                  }}
-                  className="py-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-lg transition-all hover:scale-105"
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      case "seats":
-        return (
-          <SeatMap
-            occupiedSeats={booking.occupiedSeats}
-            selectedSeats={state.seats}
-            ticketCount={state.ticketCount}
-            onToggleSeat={booking.toggleSeat}
-            onConfirm={handleConfirmSeats}
-          />
-        );
-      case "review":
-        return (
-          <BookingSummary
-            booking={state}
-            onConfirm={handleConfirmBooking}
-            onEdit={handleEditStep}
-          />
-        );
-      case "confirmed":
-        return (
-          <Confirmation
-            booking={state}
-            bookingId={bookingId}
-            onRestart={handleRestart}
-          />
-        );
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div className="h-screen flex flex-col bg-slate-950 overflow-hidden">
-      <Header onRestart={handleRestart} />
-      <ProgressBar currentStep={state.step} />
-
-      {!isAIEnabled() && (
-        <div className="px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 text-xs text-amber-400">
-          <Info className="w-3.5 h-3.5 flex-shrink-0" />
-          <span className="truncate">
-            Running in offline mode. Add your OpenAI API key in src/config.ts to enable AI-powered conversation.
-          </span>
-          <button
-            onClick={() => setShowInfo(!showInfo)}
-            className="ml-auto text-amber-400 hover:text-amber-300 underline flex-shrink-0"
-          >
-            {showInfo ? "Hide" : "How?"}
-          </button>
-        </div>
-      )}
-      {showInfo && !isAIEnabled() && (
-        <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs text-slate-400">
-          Open <code className="text-cyan-400 bg-slate-800 px-1 rounded">src/config.ts</code> and paste your OpenAI API key into the <code className="text-cyan-400 bg-slate-800 px-1 rounded">OPENAI_API_KEY</code> variable. Get a key from platform.openai.com/api-keys. The app works fully without it using the built-in conversation engine.
-        </div>
-      )}
-
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Chat panel */}
-        <div className="flex-1 flex flex-col min-h-0 lg:max-w-[440px] border-r border-slate-800">
-          {/* Avatar + status */}
-          <div className="flex-shrink-0 pt-4 pb-2 bg-slate-900/50">
-            <Avatar
-              isSpeaking={isSpeaking}
-              isListening={false}
-              isThinking={isThinking}
-              genre={state.movie?.genre || null}
-            />
-          </div>
-
-          {/* Chat transcript */}
-          <ChatTranscript messages={messages} />
-
-          {/* Input — mic is always enabled so users can interrupt the avatar */}
-          <VoiceInput
-            onSendMessage={handleSendMessage}
-            disabled={isThinking}
-            ttsEnabled={ttsEnabled}
-            onToggleTts={handleToggleTts}
-          />
-        </div>
-
-        {/* Visual booking panel */}
-        <div className="flex-1 overflow-y-auto bg-slate-900/30">
-          {renderPanel()}
-        </div>
-      </div>
-    </div>
-  );
+function SummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return <div className={`flex items-center justify-between gap-4 ${strong ? "text-lg font-bold text-white" : "text-slate-300"}`}><span className="text-slate-500">{label}</span><span>{value}</span></div>;
 }
 
 export default App;

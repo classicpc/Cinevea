@@ -9,7 +9,7 @@ export function ProgressBar({ currentStep }: ProgressBarProps) {
   const currentIdx = STEP_ORDER.indexOf(currentStep);
 
   return (
-    <div className="px-5 py-3 border-b border-slate-800 bg-slate-900/50">
+    <div className="px-5 py-3 border-b border-white/10 bg-slate-950/45 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-1">
         {STEP_ORDER.map((step, idx) => {
           const isComplete = idx < currentIdx;

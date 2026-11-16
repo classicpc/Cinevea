@@ -1,11 +1,9 @@
 import {
-  type Movie,
-  type Seat,
   type BookingState,
   formatDuration,
   getDates,
 } from "@/types";
-import { Calendar, Clock, Film, Sofa, Ticket, Check, RotateCcw } from "lucide-react";
+import { Calendar, Clock, Sofa, Ticket, Check, RotateCcw } from "lucide-react";
 
 interface BookingSummaryProps {
   booking: BookingState;
