@@ -28,7 +28,81 @@ import { speechController } from "@/lib/speech";
 
 type Message = { id: number; role: "assistant" | "user"; text: string };
 type SeatStatus = "available" | "held" | "booked";
+type SeatPreference = "middle" | "front" | "back" | "center";
+type SeatRecommendation = {
+  seats: Array<{ row: string; col: number }>;
+  score: number;
+  explanation: string;
+};
 const steps = ["movie", "date", "showtime", "tickets", "seats", "review", "confirmed"] as const;
+
+function calculateSeatRecommendations(
+  statuses: Record<string, SeatStatus>,
+  ticketCount: number,
+  preference: SeatPreference,
+): SeatRecommendation[] {
+  if (ticketCount < 1) return [];
+  const rows = [...new Set(Object.keys(statuses).map((key) => key.split("-")[0]))].sort();
+  const rowLabels = rows.length ? rows : SEAT_ROWS;
+  const columns = rows.length
+    ? Math.max(...Object.keys(statuses).map((key) => Number(key.split("-")[1])))
+    : SEAT_COLS;
+  const idealRow = preference === "front"
+    ? 0
+    : preference === "back"
+      ? rowLabels.length - 1
+      : Math.round((rowLabels.length - 1) / 2);
+  const idealColumn = (columns + 1) / 2;
+  const candidates: SeatRecommendation[] = [];
+
+  for (const [rowIndex, row] of rowLabels.entries()) {
+    for (let start = 1; start <= columns - ticketCount + 1; start++) {
+      const seats = Array.from({ length: ticketCount }, (_, offset) => ({ row, col: start + offset }));
+      if (!seats.every((seat) => (statuses[`${seat.row}-${seat.col}`] ?? "available") === "available")) continue;
+      const groupCenter = (start + start + ticketCount - 1) / 2;
+      const centerScore = 1 - Math.min(Math.abs(groupCenter - idealColumn) / Math.max(idealColumn - 1, 1), 1);
+      const distanceScore = 1 - Math.min(Math.abs(rowIndex - idealRow) / Math.max(rowLabels.length - 1, 1), 1);
+      const preferenceScore = preference === "center"
+        ? centerScore
+        : 1 - Math.min(Math.abs(rowIndex - idealRow) / Math.max(rowLabels.length - 1, 1), 1);
+      const score = Math.round((centerScore * 30 + distanceScore * 25 + 20 + preferenceScore * 15 + 10) * 100 / 100);
+      candidates.push({
+        seats,
+        score,
+        explanation: `Row ${row} keeps your group together with a balanced viewing position near the ${preference === "front" ? "front" : preference === "back" ? "back" : "middle"} of the auditorium.`,
+      });
+    }
+  }
+
+  if (!candidates.length) {
+    const available = Object.entries(statuses)
+      .filter(([, status]) => status === "available")
+      .map(([key]) => {
+        const [row, column] = key.split("-");
+        const rowIndex = rowLabels.indexOf(row);
+        const col = Number(column);
+        const centerDistance = Math.abs(col - idealColumn);
+        const rowDistance = Math.abs(rowIndex - idealRow);
+        return { row, col, rank: centerDistance + rowDistance };
+      })
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, ticketCount);
+    if (available.length === ticketCount) {
+      candidates.push({
+        seats: available.map(({ row, col }) => ({ row, col })),
+        score: 55,
+        explanation: "Consecutive seats were unavailable, so these are the closest available seats to your preferred viewing area.",
+      });
+    }
+  }
+
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .filter((recommendation, index, all) =>
+      index === all.findIndex((candidate) => candidate.seats.map((seat) => `${seat.row}-${seat.col}`).join(",") === recommendation.seats.map((seat) => `${seat.row}-${seat.col}`).join(",")),
+    )
+    .slice(0, 5);
+}
 
 const initialBooking: BookingState = {
   movie: null,
@@ -79,6 +153,9 @@ function BookingApp() {
   const [assistantOpen, setAssistantOpen] = useState(true);
   const [seatStatuses, setSeatStatuses] = useState<Record<string, SeatStatus>>({});
   const [seatLoading, setSeatLoading] = useState(false);
+  const [seatPreference, setSeatPreference] = useState<SeatPreference>("middle");
+  const [recommendations, setRecommendations] = useState<SeatRecommendation[]>([]);
+  const [recommendationIndex, setRecommendationIndex] = useState(0);
   const initialized = useRef(false);
   const messageId = useRef(0);
 
@@ -207,6 +284,8 @@ function BookingApp() {
     const showtimeId = booking.movie?.showtimeIds?.[showtime] ?? null;
     setBooking((state) => ({ ...state, showtime, showtimeId, holdToken: null, ticketCount: 0, seats: [], step: "tickets" }));
     setSeatStatuses({});
+    setRecommendations([]);
+    setRecommendationIndex(0);
     if (showtimeId && supabase) {
       setSeatLoading(true);
       const { data, error } = await supabase
@@ -225,6 +304,8 @@ function BookingApp() {
 
   const chooseTickets = useCallback((count: number) => {
     setBooking((state) => ({ ...state, ticketCount: count, seats: [], step: "seats" }));
+    setRecommendations([]);
+    setRecommendationIndex(0);
     announce(`${count} ticket${count === 1 ? "" : "s"} selected. Choose your seats.`);
   }, [announce]);
 
@@ -243,29 +324,26 @@ function BookingApp() {
     });
   }, [seatStatuses]);
 
-  const recommendSeats = useCallback(() => {
-    if (booking.ticketCount < 1) return;
-    const preferredRows = ["D", "E", "C", "F", "B", "G", "A", "H"];
-    const row = preferredRows.find((candidate) => Array.from({ length: SEAT_COLS - booking.ticketCount + 1 }, (_, index) =>
-      Array.from({ length: booking.ticketCount }, (_, offset) => seatStatuses[`${candidate}-${index + offset + 1}`] ?? "available").every((status) => status === "available"),
-    ).some(Boolean));
-    if (!row) {
-      announce("There are not enough adjacent available seats for this ticket count.");
-      return;
+  const findBestSeats = useCallback(() => {
+    const next = calculateSeatRecommendations(seatStatuses, booking.ticketCount, seatPreference);
+    setRecommendations(next);
+    setRecommendationIndex(0);
+    if (!next.length) {
+      announce("There are not enough available seats for this ticket count.");
     }
-    const start = Array.from({ length: SEAT_COLS - booking.ticketCount + 1 }, (_, index) =>
-      Array.from({ length: booking.ticketCount }, (_, offset) => seatStatuses[`${row}-${index + offset + 1}`] ?? "available").every((status) => status === "available"),
-    ).findIndex(Boolean) + 1;
+  }, [announce, booking.ticketCount, seatPreference, seatStatuses]);
+
+  const selectRecommendation = useCallback((recommendation: SeatRecommendation) => {
     setBooking((state) => ({
       ...state,
-      seats: Array.from({ length: state.ticketCount }, (_, index) => ({
-        row,
-        col: start + index,
-        status: "selected" as const,
-      })),
+      seats: recommendation.seats.map((seat) => ({ ...seat, status: "selected" as const })),
     }));
-    announce(`I selected ${booking.ticketCount} centered seats in row ${row}. You can adjust them manually.`);
-  }, [announce, booking.ticketCount, seatStatuses]);
+    announce(`Selected Row ${recommendation.seats[0]?.row}, seats ${recommendation.seats.map((seat) => seat.col).join(", ")}.`);
+  }, [announce]);
+
+  const showAlternative = useCallback(() => {
+    setRecommendationIndex((index) => recommendations.length ? (index + 1) % recommendations.length : 0);
+  }, [recommendations.length]);
 
   const review = useCallback(async () => {
     if (booking.seats.length !== booking.ticketCount) return;
@@ -427,7 +505,7 @@ function BookingApp() {
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
             {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} onSelect={chooseShowtime} />}
             {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
-            {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} onToggle={toggleSeat} onRecommend={recommendSeats} onConfirm={review} />}
+            {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={review} />}
             {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
             {booking.step === "confirmed" && <Confirmation reference={bookingRef} onRestart={restart} />}
           </main>
@@ -481,8 +559,103 @@ function TicketPicker({ onSelect }: { onSelect: (count: number) => void }) {
   return <section><SectionTitle eyebrow="Step 04" title="How many tickets?" icon={<Ticket />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-5">{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <button key={count} onClick={() => onSelect(count)} className="rounded-2xl border border-white/10 bg-white/[0.045] p-6 text-2xl font-bold transition hover:border-rose-400/50 hover:bg-rose-500/10">{count}</button>)}</div></section>;
 }
 
-function SeatPicker({ booking, seatStatuses, loading, onToggle, onRecommend, onConfirm }: { booking: BookingState; seatStatuses: Record<string, SeatStatus>; loading: boolean; onToggle: (row: string, col: number) => void; onRecommend: () => void; onConfirm: () => void }) {
-  return <section><SectionTitle eyebrow="Step 05" title="Choose your seats" icon={<Ticket />} /><div className="mb-5 rounded-2xl border border-rose-400/30 bg-slate-500/10 p-4 text-center"><div className="mx-auto max-w-xl rounded-[50%] border-2 border-rose-300/80 bg-rose-300/20 py-2 text-xs font-bold uppercase tracking-[0.45em] text-rose-100">Screen</div><p className="mt-2 text-xs text-rose-200/70">Rows A–C are closest · Rows D–F are the recommended viewing area</p></div><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-400">{loading ? "Loading live seat availability…" : "Select available seats, or let Cinevea choose the best centered seats."}</p><button type="button" onClick={onRecommend} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-rose-300/40 bg-slate-400/15 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-400/20 disabled:opacity-50"><Sparkles className="h-4 w-4" /> Recommend seats</button></div><div className="mx-auto max-w-2xl space-y-2 overflow-x-auto" aria-label="Seat map">{SEAT_ROWS.map((row) => <div key={row} className="flex min-w-[500px] items-center justify-center gap-1.5"><span className="w-5 text-xs font-semibold text-slate-500">{row}</span>{Array.from({ length: SEAT_COLS }, (_, index) => { const col = index + 1; const key = `${row}-${col}`; const status = seatStatuses[key] ?? "available"; const selected = booking.seats.some((seat) => seat.row === row && seat.col === col); const unavailable = status === "booked" || status === "held"; return <button type="button" key={col} disabled={unavailable || loading} aria-label={`Row ${row}, seat ${col}, ${selected ? "selected" : status}`} onClick={() => onToggle(row, col)} className={`h-8 w-8 rounded-lg text-xs transition hover:scale-105 disabled:cursor-not-allowed ${selected ? "bg-rose-400 text-slate-950 shadow-lg shadow-rose-400/30" : status === "booked" ? "bg-slate-600 text-slate-400" : status === "held" ? "bg-slate-400 text-slate-900" : "bg-white/10 text-slate-400 hover:bg-white/20"}`}>{selected ? <Check className="mx-auto h-3.5 w-3.5" /> : col}</button>; })}</div>)}</div><div className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-slate-400"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-white/10" /> Available</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-rose-400" /> Selected</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-600" /> Booked</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-400" /> Held</span></div><button onClick={onConfirm} disabled={loading || booking.seats.length !== booking.ticketCount} className="mx-auto mt-7 block rounded-2xl bg-rose-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500">{booking.seats.length === booking.ticketCount ? "Review booking" : `Choose ${booking.ticketCount - booking.seats.length} more`}</button></section>;
+function SeatPicker({
+  booking,
+  seatStatuses,
+  loading,
+  preference,
+  recommendations,
+  recommendationIndex,
+  onPreferenceChange,
+  onFindBest,
+  onSelectRecommendation,
+  onAlternative,
+  onToggle,
+  onConfirm,
+}: {
+  booking: BookingState;
+  seatStatuses: Record<string, SeatStatus>;
+  loading: boolean;
+  preference: SeatPreference;
+  recommendations: SeatRecommendation[];
+  recommendationIndex: number;
+  onPreferenceChange: (preference: SeatPreference) => void;
+  onFindBest: () => void;
+  onSelectRecommendation: (recommendation: SeatRecommendation) => void;
+  onAlternative: () => void;
+  onToggle: (row: string, col: number) => void;
+  onConfirm: () => void;
+}) {
+  const recommendation = recommendations[recommendationIndex];
+  const rows = [...new Set(Object.keys(seatStatuses).map((key) => key.split("-")[0]))].sort();
+  const seatRows = rows.length ? rows : SEAT_ROWS;
+  const columns = rows.length ? Math.max(...Object.keys(seatStatuses).map((key) => Number(key.split("-")[1]))) : SEAT_COLS;
+
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 05" title="Choose your seats" icon={<Ticket />} />
+      <div className="mb-5 rounded-2xl border border-rose-400/30 bg-slate-500/10 p-4 text-center">
+        <div className="mx-auto max-w-xl rounded-[50%] border-2 border-rose-300/80 bg-rose-300/20 py-2 text-xs font-bold uppercase tracking-[0.45em] text-rose-100">Screen</div>
+        <p className="mt-2 text-xs text-rose-200/70">Rows closest to the screen are first · Middle rows usually provide the best view</p>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-rose-300/25 bg-rose-400/10 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Recommended Seats</p>
+            <p className="mt-1 text-xs text-slate-400">Find the highest-scoring available seats for {booking.ticketCount} ticket{booking.ticketCount === 1 ? "" : "s"}.</p>
+          </div>
+          <button type="button" onClick={onFindBest} disabled={loading} className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-rose-300 disabled:opacity-50">Find Best Seats</button>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="text-xs text-slate-400" htmlFor="seat-preference">Preference</label>
+          <select id="seat-preference" value={preference} onChange={(event) => onPreferenceChange(event.target.value as SeatPreference)} className="rounded-lg border border-white/10 bg-slate-900/70 px-3 py-2 text-xs text-white outline-none focus:border-rose-400/60">
+            <option value="middle">Middle rows</option>
+            <option value="center">Horizontal center</option>
+            <option value="front">Front rows</option>
+            <option value="back">Back rows</option>
+          </select>
+        </div>
+        {recommendation && (
+          <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/30 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-300">Recommended for you</p>
+                <p className="mt-1 font-semibold text-white">Row {recommendation.seats[0].row} · Seats {recommendation.seats.map((seat) => seat.col).join(", ")}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-300">{recommendation.explanation}</p>
+              </div>
+              <span className="rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-200">Score {recommendation.score}/100</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={() => onSelectRecommendation(recommendation)} className="rounded-lg bg-rose-400 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-rose-300">Select These Seats</button>
+              {recommendations.length > 1 && <button type="button" onClick={onAlternative} className="rounded-lg border border-white/15 px-3 py-2 text-xs text-slate-300 hover:border-rose-300/50 hover:text-white">View Alternative</button>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mx-auto max-w-2xl space-y-2 overflow-x-auto" aria-label="Seat map">
+        {seatRows.map((row) => <div key={row} className="flex min-w-[500px] items-center justify-center gap-1.5">
+          <span className="w-5 text-xs font-semibold text-slate-500">{row}</span>
+          {Array.from({ length: columns }, (_, index) => {
+            const col = index + 1;
+            const key = `${row}-${col}`;
+            const status = seatStatuses[key] ?? "available";
+            const selected = booking.seats.some((seat) => seat.row === row && seat.col === col);
+            const unavailable = status === "booked" || status === "held";
+            return <button type="button" key={col} disabled={unavailable || loading} aria-label={`Row ${row}, seat ${col}, ${selected ? "selected" : status}`} onClick={() => onToggle(row, col)} className={`h-8 w-8 rounded-lg text-xs transition hover:scale-105 disabled:cursor-not-allowed ${selected ? "bg-rose-400 text-slate-950 shadow-lg shadow-rose-400/30" : status === "booked" ? "bg-slate-600 text-slate-400" : status === "held" ? "bg-slate-400 text-slate-900" : "bg-white/10 text-slate-400 hover:bg-white/20"}`}>{selected ? <Check className="mx-auto h-3.5 w-3.5" /> : col}</button>;
+          })}
+        </div>)}
+      </div>
+      <div className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-slate-400">
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-white/10" /> Available</span>
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-rose-400" /> Selected</span>
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-600" /> Booked</span>
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-400" /> Held</span>
+      </div>
+      <button onClick={onConfirm} disabled={loading || booking.seats.length !== booking.ticketCount} className="mx-auto mt-7 block rounded-2xl bg-rose-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500">{booking.seats.length === booking.ticketCount ? "Review booking" : `Choose ${booking.ticketCount - booking.seats.length} more`}</button>
+    </section>
+  );
 }
 
 function Review({ booking, onConfirm, saving }: { booking: BookingState; onConfirm: () => void; saving: boolean }) {
