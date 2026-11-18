@@ -199,6 +199,13 @@ export const STEP_LABELS: Record<BookingStep, string> = {
   confirmed: "Confirmed",
 };
 
+/** Formats a Date as YYYY-MM-DD in the user's local timezone (toISOString would use UTC and shift evening dates). */
+export function toLocalDateKey(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The next 7 days starting today, with local-date keys. */
 export function getDates(): { label: string; value: string; weekday: string }[] {
   const days: { label: string; value: string; weekday: string }[] = [];
   const today = new Date();
@@ -207,7 +214,7 @@ export function getDates(): { label: string; value: string; weekday: string }[] 
   for (let i = 0; i < 7; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
-    const value = d.toISOString().split("T")[0];
+    const value = toLocalDateKey(d);
     const weekday = weekdays[d.getDay()];
     const label = `${months[d.getMonth()]} ${d.getDate()}`;
     days.push({ label, value, weekday });

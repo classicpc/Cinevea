@@ -26,6 +26,7 @@ import {
   computeTicketCount,
   computeTicketPrice,
   getDates,
+  toLocalDateKey,
   SEAT_COLS,
   SEAT_ROWS,
   TICKET_TYPES,
@@ -44,6 +45,10 @@ type SeatRecommendation = {
   score: number;
   explanation: string;
 };
+/** Intl may emit narrow no-break spaces ("7:00\u202fPM"); normalise so showtimes compare and match typed text. */
+const formatShowtime = (date: Date) =>
+  date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ");
+
 const steps = ["movie", "date", "showtime", "tickets", "seats", "review", "confirmed"] as const;
 
 function calculateSeatRecommendations(
@@ -260,8 +265,8 @@ function BookingApp() {
         const showtimesByDate: Record<string, { time: string; id: string }[]> = {};
         for (const showtime of forMovie) {
           const startDate = new Date(showtime.starts_at);
-          const dateKey = startDate.toISOString().split("T")[0];
-          const time = startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          const dateKey = toLocalDateKey(startDate);
+          const time = formatShowtime(startDate);
           (showtimesByDate[dateKey] ??= []).push({ time, id: showtime.id });
         }
         return {
@@ -273,7 +278,7 @@ function BookingApp() {
           duration: movie.runtime_minutes || 0,
           poster: movie.poster_url || "",
           description: movie.synopsis || "Details unavailable.",
-          showtimes: forMovie.map((showtime) => new Date(showtime.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+          showtimes: forMovie.map((showtime) => formatShowtime(new Date(showtime.starts_at))),
           showtimesByDate,
         };
       });
@@ -287,18 +292,19 @@ function BookingApp() {
     speak(text);
   }, [addMessage, speak]);
 
-  const chooseMovie = useCallback((movie: Movie) => {
+  // The `quiet` flag is used when the assistant already replied, so we don't post a second message.
+  const chooseMovie = useCallback((movie: Movie, quiet = false) => {
     setBooking((state) => ({ ...state, movie, date: null, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "date" }));
-    announce(`${movie.title} selected. Choose a date to see available showtimes.`);
+    if (!quiet) announce(`${movie.title} selected. Choose a date to see available showtimes.`);
   }, [announce]);
 
-  const chooseDate = useCallback((date: string) => {
+  const chooseDate = useCallback((date: string, quiet = false) => {
     setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "showtime" }));
     const formatted = dates.find((item) => item.value === date)?.label ?? date;
-    announce(`Showtimes for ${formatted} are now available. Choose a time.`);
+    if (!quiet) announce(`Showtimes for ${formatted} are now available. Choose a time.`);
   }, [announce, dates]);
 
-  const chooseShowtime = useCallback(async (showtime: string) => {
+  const chooseShowtime = useCallback(async (showtime: string, quiet = false) => {
     const showtimeId = booking.date
       ? booking.movie?.showtimesByDate?.[booking.date]?.find((entry) => entry.time === showtime)?.id ?? null
       : null;
@@ -319,15 +325,15 @@ function BookingApp() {
         setSeatStatuses(Object.fromEntries((data ?? []).map((seat) => [`${seat.row_label}-${seat.seat_number}`, seat.status as SeatStatus])));
       }
     }
-    announce(`${showtime} selected. How many tickets do you need?`);
+    if (!quiet) announce(`${showtime} selected. How many tickets do you need?`);
   }, [announce, booking.date, booking.movie]);
 
-  const chooseTickets = useCallback((breakdown: Record<string, number>) => {
+  const chooseTickets = useCallback((breakdown: Record<string, number>, quiet = false) => {
     const count = computeTicketCount(breakdown);
     setBooking((state) => ({ ...state, ticketCount: count, ticketBreakdown: breakdown, seats: [], step: "seats" }));
     setRecommendations([]);
     setRecommendationIndex(0);
-    announce(`${count} ticket${count === 1 ? "" : "s"} selected. Choose your seats.`);
+    if (!quiet) announce(`${count} ticket${count === 1 ? "" : "s"} selected. Choose your seats.`);
   }, [announce]);
 
   const toggleSeat = useCallback((row: string, col: number) => {
@@ -366,23 +372,25 @@ function BookingApp() {
     setRecommendationIndex((index) => recommendations.length ? (index + 1) % recommendations.length : 0);
   }, [recommendations.length]);
 
-  const review = useCallback(async () => {
-    if (booking.seats.length !== booking.ticketCount) return;
+  // `seatsOverride` lets the assistant review seats it just selected, before React state has updated.
+  const review = useCallback(async (seatsOverride?: BookingState["seats"]) => {
+    const seats = seatsOverride ?? booking.seats;
+    if (seats.length !== booking.ticketCount) return;
     if (booking.showtimeId && supabase) {
       const { data, error } = await supabase.rpc("reserve_showtime_seats", {
         p_showtime_id: booking.showtimeId,
-        p_seats: booking.seats.map((seat) => ({ row: seat.row, number: seat.col })),
+        p_seats: seats.map((seat) => ({ row: seat.row, number: seat.col })),
         p_idempotency_key: crypto.randomUUID(),
       });
       if (error) {
         announce(`Those seats are no longer available: ${error.message}`);
         return;
       }
-      setBooking((state) => ({ ...state, holdToken: data?.hold_token ?? null, step: "review" }));
+      setBooking((state) => ({ ...state, seats, holdToken: data?.hold_token ?? null, step: "review" }));
       announce("Your seats are temporarily held for five minutes. Review your booking before confirming.");
       return;
     }
-    setBooking((state) => ({ ...state, step: "review" }));
+    setBooking((state) => ({ ...state, seats, step: "review" }));
     announce("Your seats are selected. Review your booking before confirming.");
   }, [announce, booking.seats, booking.showtimeId, booking.ticketCount]);
 
@@ -452,6 +460,62 @@ function BookingApp() {
     });
   }, []);
 
+  /** Carries out an assistant action, validating it against the live UI state so a bad model reply can't corrupt the booking. */
+  const runAssistantAction = useCallback((action: NonNullable<Awaited<ReturnType<typeof aiRespond>>["action"]>) => {
+    switch (action.type) {
+      case "select_movie": {
+        const movie = catalogMovies.find((item) => item.id === action.movieId);
+        if (movie && ["greeting", "date"].includes(booking.step)) chooseMovie(movie, true);
+        break;
+      }
+      case "select_date":
+        if (booking.step === "date" && dates.some((item) => item.value === action.date)) chooseDate(action.date, true);
+        break;
+      case "select_showtime": {
+        const available = booking.date ? booking.movie?.showtimesByDate?.[booking.date] ?? [] : [];
+        if (booking.step === "showtime" && available.some((entry) => entry.time === action.showtime)) {
+          void chooseShowtime(action.showtime, true);
+        }
+        break;
+      }
+      case "set_tickets":
+        if (booking.step === "tickets" && Number.isInteger(action.count) && action.count >= 1 && action.count <= 10) {
+          chooseTickets({ adult: action.count }, true);
+        }
+        break;
+      case "select_seats": {
+        if (booking.step !== "seats") break;
+        let seats: BookingState["seats"] = [];
+        if (action.seats.length === 0) {
+          const best = calculateSeatRecommendations(seatStatuses, booking.ticketCount, seatPreference)[0];
+          seats = (best?.seats ?? []).map((seat) => ({ ...seat, status: "selected" as const }));
+        } else {
+          seats = action.seats
+            .map((label) => label.match(/^([A-Za-z])(\d{1,2})$/))
+            .filter((match): match is RegExpMatchArray => Boolean(match))
+            .map((match) => ({ row: match[1].toUpperCase(), col: Number(match[2]), status: "selected" as const }));
+          const allFree = seats.every((seat) => (seatStatuses[`${seat.row}-${seat.col}`] ?? "available") === "available");
+          if (!allFree) {
+            announce("Sorry, one of those seats is already taken. Please choose different seats.");
+            seats = [];
+          }
+        }
+        if (seats.length === booking.ticketCount) void review(seats);
+        else if (action.seats.length === 0) announce("I couldn't find enough available seats together. Please choose seats on the map.");
+        break;
+      }
+      case "confirm_booking":
+        if (booking.step === "review") void confirm();
+        break;
+      case "go_back":
+        goBack();
+        break;
+      case "restart":
+        restart();
+        break;
+    }
+  }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, confirm, dates, goBack, restart, review, seatPreference, seatStatuses]);
+
   const sendText = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed || thinking) return;
@@ -459,30 +523,33 @@ function BookingApp() {
     speechController.stopSpeaking();
     setSpeaking(false);
     setThinking(true);
-    window.setTimeout(() => {
-      void aiRespond(trimmed, booking, messages.map((message) => ({
-        id: String(message.id),
-        role: message.role,
-        text: message.text,
-        timestamp: Date.now(),
-      })), catalogMovies).then((response) => {
-      setThinking(false);
-      const action = response.action;
-      if (action?.type === "select_movie") {
-        const movie = catalogMovies.find((item) => item.id === action.movieId);
-        if (movie) chooseMovie(movie);
-      } else if (action?.type === "select_date") {
-        chooseDate(action.date);
-      } else if (action?.type === "select_showtime") {
-        chooseShowtime(action.showtime);
-      } else if (action?.type === "set_tickets") {
-        chooseTickets({ adult: action.count });
-      } else {
-        announce(response.text);
-      }
-      });
-    }, 250);
-  }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, thinking, addMessage, messages]);
+
+    // Show the assistant only the showtimes for the chosen date, not every date.
+    const todaysTimes = booking.movie && booking.date
+      ? (booking.movie.showtimesByDate?.[booking.date] ?? []).map((entry) => entry.time)
+      : null;
+    const assistantState = booking.movie && todaysTimes
+      ? { ...booking, movie: { ...booking.movie, showtimes: todaysTimes } }
+      : booking;
+    const history = messages.map((message) => ({
+      id: String(message.id),
+      role: message.role,
+      text: message.text,
+      timestamp: Date.now(),
+    }));
+
+    void aiRespond(trimmed, assistantState, history, catalogMovies)
+      .then((response) => {
+        const { action } = response;
+        // restart() clears the transcript, so run it first and post the reply afterwards.
+        if (action) runAssistantAction(action);
+        const reply = response.text || (action ? "Okay." : "Sorry, I didn't get that.");
+        if (action?.type === "restart") window.setTimeout(() => announce(reply), 0);
+        else announce(reply);
+      })
+      .catch(() => announce("Sorry, something went wrong. Please try again."))
+      .finally(() => setThinking(false));
+  }, [announce, addMessage, booking, catalogMovies, messages, runAssistantAction, thinking]);
 
   return (
     <div className="min-h-screen bg-[#171923] text-slate-100">
@@ -543,7 +610,7 @@ function BookingApp() {
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
             {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} date={booking.date} onSelect={chooseShowtime} />}
             {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
-            {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={review} />}
+            {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={() => void review()} />}
             {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
             {booking.step === "confirmed" && <Confirmation reference={bookingRef} onRestart={restart} />}
           </main>
