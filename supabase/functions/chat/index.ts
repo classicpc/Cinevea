@@ -5,8 +5,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Action protocol shared with src/lib/conversation.ts (parseAssistantReply).
 const actionInstructions = `
-When the user's intent is clear, append one action JSON object on a new line:
+When the user's intent is clear, append exactly one action JSON object on its own final line:
 ACTION: {"type":"select_movie","movieId":"..."}
 ACTION: {"type":"select_date","date":"YYYY-MM-DD"}
 ACTION: {"type":"select_showtime","showtime":"..."}
@@ -16,7 +17,10 @@ ACTION: {"type":"confirm_booking"}
 ACTION: {"type":"go_back"}
 ACTION: {"type":"restart"}
 Only emit an action when the user's intent is clear. Never invent IDs, dates, showtimes, or seat numbers.
+Use movie ids, YYYY-MM-DD dates and showtime strings exactly as they appear in the catalog. Only emit the action that matches the current booking step (select_movie at the start, then select_date, select_showtime, set_tickets, select_seats, confirm_booking). Only emit confirm_booking when the user explicitly confirms on the review step.
 `;
+
+const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
@@ -41,7 +45,11 @@ Deno.serve(async (request) => {
           && typeof (message as { text?: unknown }).text === "string")
         .slice(-10)
       : [];
-    const catalogContext = await getCatalogContext(request, userText);
+    // Prefer the catalog the UI is showing (matches ids/showtime strings the client can act on);
+    // fall back to a database lookup for older clients.
+    const catalogContext = isClientCatalog(body.catalog)
+      ? body.catalog
+      : await getCatalogContext(request, userText);
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -49,13 +57,13 @@ Deno.serve(async (request) => {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: MODEL,
         temperature: 0.7,
         max_tokens: 300,
         messages: [
           {
             role: "system",
-            content: `You are Cinevea, a friendly movie booking assistant. Help users choose a movie, date, showtime, ticket count, seats, and confirm a booking. Keep responses concise and never claim a booking is confirmed unless the user has explicitly confirmed it. Only state movie or showtime availability when supported by the catalog context below. If the context has no matching records, say that you could not find a matching live result. Current booking state: ${JSON.stringify(state)}. Catalog context: ${JSON.stringify(catalogContext)}. ${actionInstructions}`,
+            content: `You are Cinevea, a friendly movie booking assistant. Help users choose a movie, date, showtime, ticket count, seats, and confirm a booking. Keep responses concise (1-3 sentences) and never claim a booking is confirmed unless the user has explicitly confirmed it. Only state movie or showtime availability when supported by the catalog context below. If the context has no matching records, say that you could not find a matching live result. Dates must be chosen from catalog.dates. Current booking state: ${JSON.stringify(state)}. Catalog context: ${JSON.stringify(catalogContext)}. ${actionInstructions}`,
           },
           ...history.map((message) => ({ role: message.role, content: message.text })),
           { role: "user", content: userText },
@@ -79,7 +87,11 @@ Deno.serve(async (request) => {
   }
 });
 
-function json(body: Record<string, string>, status: number) {
+function isClientCatalog(value: unknown): value is { movies: unknown[] } {
+  return typeof value === "object" && value !== null && Array.isArray((value as { movies?: unknown }).movies);
+}
+
+function json(body: Record<string, unknown>, status: number) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -108,13 +120,18 @@ async function getCatalogContext(request: Request, userText: string) {
     `genre.ilike.%${term}%`,
     `language.ilike.%${term}%`,
   ]);
-  let query = db
+  const baseQuery = () => db
     .from("movies")
     .select("id,title,genre,language,age_rating,rating,synopsis,showtimes(id,starts_at,format,ticket_price)")
     .eq("is_coming_soon", false)
     .limit(12);
+  let query = baseQuery();
   if (filters.length) query = query.or(filters.join(","));
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (!error && !data?.length && filters.length) {
+    // Greetings like "hello" match nothing; give the model the general catalog instead.
+    ({ data, error } = await baseQuery());
+  }
   if (error) {
     console.error("Catalog context lookup failed", error.message);
     throw new Error("Could not retrieve live catalog context.");

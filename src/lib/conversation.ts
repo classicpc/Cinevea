@@ -1,6 +1,7 @@
-// Conversation engine for Cinevea
-// Uses OpenAI if an API key is configured, otherwise falls back to
-// a rule-based NLU engine that fully handles the booking flow.
+// Conversation engine for Cinevea.
+// `aiRespond` asks the `chat` Supabase Edge Function (OpenAI) for a reply and
+// falls back to the local rule-based engine (`ruleBasedRespond`) whenever the
+// function is unreachable, misconfigured, or out of credits.
 
 import {
   type Movie,
@@ -35,9 +36,17 @@ export type AssistantAction =
   | { type: "restart" }
   | { type: "advance"; to: BookingStep };
 
+/**
+ * True if the text contains any of the given words/phrases.
+ * Short single words ("no", "yes", "hi") must match a whole word so that
+ * e.g. "no" does not match "know" or "now".
+ */
 function contains(text: string, ...words: string[]): boolean {
   const lower = text.toLowerCase();
-  return words.some((w) => lower.includes(w));
+  return words.some((w) => {
+    if (w.length <= 3 && !w.includes(" ")) return new RegExp(`\\b${w}\\b`).test(lower);
+    return lower.includes(w);
+  });
 }
 
 function extractNumber(text: string): number | null {
@@ -54,11 +63,12 @@ function extractNumber(text: string): number | null {
     nine: 9,
     ten: 10,
   };
-  for (const [word, num] of Object.entries(wordMap)) {
-    if (lower.includes(word)) return num;
-  }
+  // Digits win over words; words must be whole words ("someone" is not "one").
   const match = lower.match(/\d+/);
   if (match) return parseInt(match[0], 10);
+  for (const [word, num] of Object.entries(wordMap)) {
+    if (new RegExp(`\\b${word}\\b`).test(lower)) return num;
+  }
   return null;
 }
 
@@ -123,7 +133,7 @@ function findShowtime(text: string, movie: Movie | null): string | null {
   // normalize: "2 15 pm" -> "2:15 pm"
   const normalized = lower.replace(/(\d+)\s+(\d+)\s*(am|pm)/g, "$1:$2 $3");
   for (const st of movie.showtimes) {
-    if (normalized.includes(st.toLowerCase().replace(".", ""))) return st;
+    if (normalized.includes(st.toLowerCase().replace(/\./g, ""))) return st;
   }
   // just hour match: "7" -> "7:00 PM" etc
   const num = extractNumber(text);
@@ -190,7 +200,8 @@ export function ruleBasedRespond(
       action: { type: "restart" },
     };
   }
-  if (contains(text, "go back", "previous", "back up", "change my")) {
+  const wantsChange = contains(text, "change") && contains(text, "movie", "date", "showtime", "time", "ticket", "seat");
+  if (wantsChange || contains(text, "go back", "previous", "back up", "change my")) {
     if (contains(text, "movie")) return { text: "Sure, which movie would you like instead?\n" + listMovies(movies), action: { type: "go_back" } };
     if (contains(text, "date")) return { text: "No problem. Which date works better for you?", action: { type: "go_back" } };
     if (contains(text, "showtime", "time")) return { text: "Sure, which showtime would you prefer?", action: { type: "go_back" } };
@@ -201,6 +212,14 @@ export function ruleBasedRespond(
 
   switch (state.step) {
     case "greeting": {
+      // The user may name a movie straight away while still on the landing step.
+      const direct = findMovie(text, movies);
+      if (direct && movies.length) {
+        return {
+          text: `Great choice! ${direct.title} — ${direct.genre}, rated ${direct.rating}. What day would you like to see it?`,
+          action: { type: "select_movie", movieId: direct.id },
+        };
+      }
       if (contains(text, "what else can you do", "what can you do", "help", "how does this work")) {
         return {
           text: "I can help you browse movies, choose a date and showtime, select the number of tickets, find recommended seats, review your booking, and confirm it. You can type or use the microphone. What would you like to do first?",
@@ -339,6 +358,39 @@ export function ruleBasedRespond(
   }
 }
 
+const ACTION_TYPES = new Set([
+  "select_movie", "select_date", "select_showtime", "set_tickets",
+  "select_seats", "confirm_booking", "go_back", "restart",
+]);
+
+/**
+ * Splits an LLM reply into display text and (at most one) action.
+ * Every `ACTION: {...}` line is stripped from the text; the first one that
+ * parses and has a known type is returned.
+ */
+export function parseAssistantReply(content: string): AssistantResponse {
+  let action: AssistantAction | undefined;
+  const lines = content.split("\n").filter((line) => {
+    const match = line.match(/^\s*ACTION:\s*(\{.*\})\s*$/i);
+    if (!match) return true;
+    if (!action) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (parsed && ACTION_TYPES.has(parsed.type)) action = parsed as AssistantAction;
+      } catch {
+        // malformed action: drop the line, keep the conversational text
+      }
+    }
+    return false;
+  });
+  return { text: lines.join("\n").trim(), action };
+}
+
+/**
+ * Asks the AI assistant for a reply. `dates` is the list of bookable dates
+ * (YYYY-MM-DD) so the model never has to guess what "tomorrow" means.
+ * Any failure falls back to the rule-based engine so the chat never dead-ends.
+ */
 export async function aiRespond(
   userText: string,
   state: BookingState,
@@ -350,41 +402,46 @@ export async function aiRespond(
   }
 
   try {
+    const dates = getDates();
     const { data, error } = await supabase.functions.invoke("chat", {
       body: {
         userText,
         state: {
           step: state.step,
-          movie: state.movie?.title || null,
+          movieId: state.movie?.id ?? null,
+          movie: state.movie?.title ?? null,
           date: state.date,
           showtime: state.showtime,
           ticketCount: state.ticketCount,
           seats: state.seats.map((s) => `${s.row}${s.col}`),
         },
-        history: history.slice(-10),
+        history: history.slice(-10).map(({ role, text }) => ({ role, text })),
+        // Ground the model in exactly what the UI can book right now.
+        catalog: {
+          today: dates[0].value,
+          dates: dates.map((d) => d.value),
+          movies: movies.slice(0, 20).map((m) => ({
+            id: m.id,
+            title: m.title,
+            genre: m.genre,
+            rating: m.rating,
+            showtimesByDate: Object.fromEntries(
+              Object.entries(m.showtimesByDate ?? {}).map(([date, list]) => [date, list.map((entry) => entry.time)])
+            ),
+          })),
+        },
       },
     });
     if (error) throw error;
+    if (data?.error) throw new Error(String(data.error));
     const content = data?.text;
     if (typeof content !== "string" || !content.trim()) throw new Error("Chat function returned no response.");
 
-    // Parse action from response
-    const actionMatch = content.match(/ACTION:\s*({.*})/i);
-    let action: AssistantAction | undefined;
-    let text = content;
-
-    if (actionMatch) {
-      try {
-        action = JSON.parse(actionMatch[1]);
-        text = content.replace(/ACTION:\s*{.*}/i, "").trim();
-      } catch {
-        // keep full text
-      }
-    }
-
-    return { text, action };
-  } catch {
-    // fall back to rule-based
+    const reply = parseAssistantReply(content);
+    if (!reply.text && !reply.action) throw new Error("Chat function returned an empty reply.");
+    return reply;
+  } catch (error) {
+    console.warn("AI chat unavailable, using rule-based assistant:", error);
     return ruleBasedRespond(userText, state, movies);
   }
 }

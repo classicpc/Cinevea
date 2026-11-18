@@ -6,7 +6,8 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  /** `needsConfirmation` is true when the project requires email verification before sign-in. */
+  signUp: (email: string, password: string) => Promise<{ error: string | null; needsConfirmation?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
@@ -40,9 +41,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     if (!supabase) return { error: "Supabase is not configured." };
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
-    return { error: null };
+    // No session means Supabase is waiting for the user to confirm their email.
+    return { error: null, needsConfirmation: !data.session };
   };
 
   const signIn = async (email: string, password: string) => {
