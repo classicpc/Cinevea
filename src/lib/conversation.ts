@@ -3,7 +3,6 @@
 // a rule-based NLU engine that fully handles the booking flow.
 
 import {
-  MOVIES,
   type Movie,
   type BookingState,
   type BookingStep,
@@ -63,42 +62,25 @@ function extractNumber(text: string): number | null {
   return null;
 }
 
-function findMovie(text: string): Movie | null {
+function findMovie(text: string, movies: Movie[]): Movie | null {
   const lower = text.toLowerCase();
   // exact title match first
-  for (const m of MOVIES) {
+  for (const m of movies) {
     if (lower.includes(m.title.toLowerCase())) return m;
   }
   // genre-based match
-  for (const m of MOVIES) {
+  for (const m of movies) {
     if (contains(text, m.genre.toLowerCase())) return m;
   }
-  // keywords
-  const keywordMap: Record<string, string> = {
-    "first movie": "m1",
-    "second movie": "m2",
-    "third movie": "m3",
-    "fourth movie": "m4",
-    "fifth movie": "m5",
-    "sixth movie": "m6",
-    "seventh movie": "m7",
-    "movie 1": "m1",
-    "movie 2": "m2",
-    "movie 3": "m3",
-    "movie 4": "m4",
-    "movie 5": "m5",
-    "movie 6": "m6",
-    "movie 7": "m7",
-    "number 1": "m1",
-    "number 2": "m2",
-    "number 3": "m3",
-    "number 4": "m4",
-    "number 5": "m5",
-    "number 6": "m6",
-    "number 7": "m7",
-  };
-  for (const [kw, id] of Object.entries(keywordMap)) {
-    if (lower.includes(kw)) return MOVIES.find((m) => m.id === id) || null;
+  // ordinal/number match: "first movie", "movie 2", "number 3"
+  const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+  for (let i = 0; i < ordinalWords.length; i++) {
+    if (lower.includes(`${ordinalWords[i]} movie`)) return movies[i] ?? null;
+  }
+  const numberMatch = lower.match(/(?:movie|number)\s+(\d+)/);
+  if (numberMatch) {
+    const index = parseInt(numberMatch[1], 10) - 1;
+    return movies[index] ?? null;
   }
   return null;
 }
@@ -180,8 +162,9 @@ function parseSeats(text: string): string[] | null {
   return seats.length > 0 ? seats : null;
 }
 
-function listMovies(): string {
-  return MOVIES.map((m, i) => `${i + 1}. ${m.title} — ${m.genre}, ${m.rating}`).join("\n");
+function listMovies(movies: Movie[]): string {
+  if (!movies.length) return "There are no movies currently available to book.";
+  return movies.map((m, i) => `${i + 1}. ${m.title} — ${m.genre}, ${m.rating}`).join("\n");
 }
 
 function listShowtimes(movie: Movie): string {
@@ -192,7 +175,8 @@ function listShowtimes(movie: Movie): string {
 
 export function ruleBasedRespond(
   userText: string,
-  state: BookingState
+  state: BookingState,
+  movies: Movie[]
 ): AssistantResponse {
   const text = userText.trim();
   if (!text) {
@@ -202,12 +186,12 @@ export function ruleBasedRespond(
   // Global commands
   if (contains(text, "restart", "start over", "cancel", "reset", "begin again")) {
     return {
-      text: "No problem! Let's start fresh. Which movie would you like to see? Here are the options:\n" + listMovies(),
+      text: "No problem! Let's start fresh. Which movie would you like to see? Here are the options:\n" + listMovies(movies),
       action: { type: "restart" },
     };
   }
   if (contains(text, "go back", "previous", "back up", "change my")) {
-    if (contains(text, "movie")) return { text: "Sure, which movie would you like instead?\n" + listMovies(), action: { type: "go_back" } };
+    if (contains(text, "movie")) return { text: "Sure, which movie would you like instead?\n" + listMovies(movies), action: { type: "go_back" } };
     if (contains(text, "date")) return { text: "No problem. Which date works better for you?", action: { type: "go_back" } };
     if (contains(text, "showtime", "time")) return { text: "Sure, which showtime would you prefer?", action: { type: "go_back" } };
     if (contains(text, "ticket")) return { text: "How many tickets would you like?", action: { type: "go_back" } };
@@ -224,22 +208,22 @@ export function ruleBasedRespond(
       }
       if (contains(text, "what movies", "movies", "list", "options", "playing", "show me")) {
         return {
-          text: `Here are the movies currently showing:\n${listMovies()}\nYou can choose a movie by title, genre, or number.`,
+          text: `Here are the movies currently showing:\n${listMovies(movies)}\nYou can choose a movie by title, genre, or number.`,
         };
       }
       if (contains(text, "hello", "hey", "hi", "good morning", "good afternoon", "good evening")) {
         return {
-          text: `Hi! I can help you book movie tickets. Here are the current options:\n${listMovies()}\nWhich movie would you like to see?`,
+          text: `Hi! I can help you book movie tickets. Here are the current options:\n${listMovies(movies)}\nWhich movie would you like to see?`,
         };
       }
       return {
-        text: `Welcome to Cinevea! I'm your booking assistant. I can help you book movie tickets by voice or text. Which movie would you like to see? Here are the options:\n${listMovies()}`,
+        text: `Welcome to Cinevea! I'm your booking assistant. I can help you book movie tickets by voice or text. Which movie would you like to see? Here are the options:\n${listMovies(movies)}`,
         action: { type: "advance", to: "movie" },
       };
     }
 
     case "movie": {
-      const movie = findMovie(text);
+      const movie = findMovie(text, movies);
       if (movie) {
         return {
           text: `Great choice! ${movie.title} — ${movie.genre}, rated ${movie.rating}, ${movie.duration} minutes. ${movie.description} What day would you like to see it? I have showtimes for the next 7 days, starting today.`,
@@ -247,10 +231,10 @@ export function ruleBasedRespond(
         };
       }
       if (contains(text, "list", "options", "what movies", "show me")) {
-        return { text: `Here are the movies currently showing:\n${listMovies()}` };
+        return { text: `Here are the movies currently showing:\n${listMovies(movies)}` };
       }
       return {
-        text: `I couldn't find that movie. Here are the available options:\n${listMovies()}\nYou can say the title, the genre, or the number.`,
+        text: `I couldn't find that movie. Here are the available options:\n${listMovies(movies)}\nYou can say the title, the genre, or the number.`,
       };
     }
 
@@ -340,7 +324,7 @@ export function ruleBasedRespond(
     case "confirmed": {
       if (contains(text, "yes", "another", "sure", "book again", "new booking")) {
         return {
-          text: `Let's book another movie! Which one would you like to see?\n${listMovies()}`,
+          text: `Let's book another movie! Which one would you like to see?\n${listMovies(movies)}`,
           action: { type: "restart" },
         };
       }
@@ -358,10 +342,11 @@ export function ruleBasedRespond(
 export async function aiRespond(
   userText: string,
   state: BookingState,
-  history: ChatMessage[]
+  history: ChatMessage[],
+  movies: Movie[]
 ): Promise<AssistantResponse> {
   if (!supabase) {
-    return ruleBasedRespond(userText, state);
+    return ruleBasedRespond(userText, state, movies);
   }
 
   try {
@@ -400,6 +385,6 @@ export async function aiRespond(
     return { text, action };
   } catch {
     // fall back to rule-based
-    return ruleBasedRespond(userText, state);
+    return ruleBasedRespond(userText, state, movies);
   }
 }

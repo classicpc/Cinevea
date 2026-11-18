@@ -16,7 +16,7 @@ export interface Movie {
   poster: string;
   description: string;
   showtimes: string[];
-  showtimeIds?: Record<string, string>;
+  showtimesByDate?: Record<string, { time: string; id: string }[]>;
   providerId?: string;
 }
 
@@ -139,8 +139,32 @@ export interface BookingState {
   showtimeId?: string | null;
   holdToken?: string | null;
   ticketCount: number;
+  ticketBreakdown: Record<string, number>;
   seats: Seat[];
   step: BookingStep;
+}
+
+export type TicketTypeCode = "adult" | "senior" | "child" | "student";
+
+export interface TicketType {
+  code: TicketTypeCode;
+  label: string;
+  price: number;
+}
+
+export const TICKET_TYPES: TicketType[] = [
+  { code: "adult", label: "Adult", price: 14.99 },
+  { code: "senior", label: "Senior (65+)", price: 11.99 },
+  { code: "child", label: "Child (under 12)", price: 9.99 },
+  { code: "student", label: "Student", price: 12.99 },
+];
+
+export function computeTicketCount(breakdown: Record<string, number>): number {
+  return Object.values(breakdown).reduce((sum, count) => sum + count, 0);
+}
+
+export function computeTicketPrice(breakdown: Record<string, number>): number {
+  return TICKET_TYPES.reduce((sum, type) => sum + (breakdown[type.code] ?? 0) * type.price, 0);
 }
 
 export type BookingStep =

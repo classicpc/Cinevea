@@ -22,7 +22,16 @@ import { Header } from "@/components/Header";
 import { VoiceInput } from "@/components/VoiceInput";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { useAuth } from "@/hooks/useAuth";
-import { getDates, SEAT_COLS, SEAT_ROWS, type BookingState, type Movie } from "@/types";
+import {
+  computeTicketCount,
+  computeTicketPrice,
+  getDates,
+  SEAT_COLS,
+  SEAT_ROWS,
+  TICKET_TYPES,
+  type BookingState,
+  type Movie,
+} from "@/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { aiRespond } from "@/lib/conversation";
 import { speechController } from "@/lib/speech";
@@ -110,6 +119,7 @@ const initialBooking: BookingState = {
   date: null,
   showtime: null,
   ticketCount: 0,
+  ticketBreakdown: {},
   seats: [],
   step: "greeting",
 };
@@ -244,22 +254,29 @@ function BookingApp() {
       .eq("is_coming_soon", false);
     if (movieError) setCatalogError(movieError.message);
     else {
-      const mapped = (movies ?? []).map((movie) => ({
-        id: movie.id,
-        providerId: movie.provider_id || undefined,
-        title: movie.title,
-        genre: (movie.genre || "Action") as Movie["genre"],
-        rating: movie.age_rating || "Not rated",
-        duration: movie.runtime_minutes || 0,
-        poster: movie.poster_url || "",
-        description: movie.synopsis || "Details unavailable.",
-        showtimes: (showtimes ?? [])
-          .filter((showtime) => showtime.movie_id === movie.id)
-          .map((showtime) => new Date(showtime.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
-        showtimeIds: Object.fromEntries((showtimes ?? [])
-          .filter((showtime) => showtime.movie_id === movie.id)
-          .map((showtime) => [new Date(showtime.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), showtime.id])),
-      }));
+      const movieShowtimes = (showtimes ?? []);
+      const mapped = (movies ?? []).map((movie) => {
+        const forMovie = movieShowtimes.filter((showtime) => showtime.movie_id === movie.id);
+        const showtimesByDate: Record<string, { time: string; id: string }[]> = {};
+        for (const showtime of forMovie) {
+          const startDate = new Date(showtime.starts_at);
+          const dateKey = startDate.toISOString().split("T")[0];
+          const time = startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          (showtimesByDate[dateKey] ??= []).push({ time, id: showtime.id });
+        }
+        return {
+          id: movie.id,
+          providerId: movie.provider_id || undefined,
+          title: movie.title,
+          genre: (movie.genre || "Action") as Movie["genre"],
+          rating: movie.age_rating || "Not rated",
+          duration: movie.runtime_minutes || 0,
+          poster: movie.poster_url || "",
+          description: movie.synopsis || "Details unavailable.",
+          showtimes: forMovie.map((showtime) => new Date(showtime.starts_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })),
+          showtimesByDate,
+        };
+      });
       setCatalogMovies(mapped);
     }
     setCatalogLoading(false);
@@ -271,19 +288,21 @@ function BookingApp() {
   }, [addMessage, speak]);
 
   const chooseMovie = useCallback((movie: Movie) => {
-    setBooking((state) => ({ ...state, movie, date: null, showtime: null, ticketCount: 0, seats: [], step: "date" }));
+    setBooking((state) => ({ ...state, movie, date: null, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "date" }));
     announce(`${movie.title} selected. Choose a date to see available showtimes.`);
   }, [announce]);
 
   const chooseDate = useCallback((date: string) => {
-    setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, seats: [], step: "showtime" }));
+    setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "showtime" }));
     const formatted = dates.find((item) => item.value === date)?.label ?? date;
     announce(`Showtimes for ${formatted} are now available. Choose a time.`);
   }, [announce, dates]);
 
   const chooseShowtime = useCallback(async (showtime: string) => {
-    const showtimeId = booking.movie?.showtimeIds?.[showtime] ?? null;
-    setBooking((state) => ({ ...state, showtime, showtimeId, holdToken: null, ticketCount: 0, seats: [], step: "tickets" }));
+    const showtimeId = booking.date
+      ? booking.movie?.showtimesByDate?.[booking.date]?.find((entry) => entry.time === showtime)?.id ?? null
+      : null;
+    setBooking((state) => ({ ...state, showtime, showtimeId, holdToken: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "tickets" }));
     setSeatStatuses({});
     setRecommendations([]);
     setRecommendationIndex(0);
@@ -301,10 +320,11 @@ function BookingApp() {
       }
     }
     announce(`${showtime} selected. How many tickets do you need?`);
-  }, [announce, booking.movie]);
+  }, [announce, booking.date, booking.movie]);
 
-  const chooseTickets = useCallback((count: number) => {
-    setBooking((state) => ({ ...state, ticketCount: count, seats: [], step: "seats" }));
+  const chooseTickets = useCallback((breakdown: Record<string, number>) => {
+    const count = computeTicketCount(breakdown);
+    setBooking((state) => ({ ...state, ticketCount: count, ticketBreakdown: breakdown, seats: [], step: "seats" }));
     setRecommendations([]);
     setRecommendationIndex(0);
     announce(`${count} ticket${count === 1 ? "" : "s"} selected. Choose your seats.`);
@@ -383,8 +403,8 @@ function BookingApp() {
         p_movie_title: booking.movie.title,
         p_movie_genre: booking.movie.genre,
         p_movie_rating: booking.movie.rating,
-        p_ticket_count: booking.ticketCount,
-        p_total_price: booking.ticketCount * 14.99,
+        p_ticket_breakdown: booking.ticketBreakdown,
+        p_total_price: computeTicketPrice(booking.ticketBreakdown),
       });
       error = result.error;
     } else {
@@ -396,8 +416,9 @@ function BookingApp() {
       show_date: booking.date,
       showtime: booking.showtime,
       ticket_count: booking.ticketCount,
+      ticket_breakdown: booking.ticketBreakdown,
       seats: booking.seats.map((seat) => `${seat.row}${seat.col}`),
-      total_price: booking.ticketCount * 14.99,
+      total_price: computeTicketPrice(booking.ticketBreakdown),
       }));
     }
     setSaving(false);
@@ -424,7 +445,7 @@ function BookingApp() {
     setBooking((state) => {
       if (state.step === "review") return { ...state, step: "seats" };
       if (state.step === "seats") return { ...state, step: "tickets", seats: [] };
-      if (state.step === "tickets") return { ...state, step: "showtime", ticketCount: 0 };
+      if (state.step === "tickets") return { ...state, step: "showtime", ticketCount: 0, ticketBreakdown: {} };
       if (state.step === "showtime") return { ...state, step: "date", showtime: null };
       if (state.step === "date") return { ...state, step: "greeting", movie: null, date: null };
       return state;
@@ -444,7 +465,7 @@ function BookingApp() {
         role: message.role,
         text: message.text,
         timestamp: Date.now(),
-      }))).then((response) => {
+      })), catalogMovies).then((response) => {
       setThinking(false);
       const action = response.action;
       if (action?.type === "select_movie") {
@@ -455,7 +476,7 @@ function BookingApp() {
       } else if (action?.type === "select_showtime") {
         chooseShowtime(action.showtime);
       } else if (action?.type === "set_tickets") {
-        chooseTickets(action.count);
+        chooseTickets({ adult: action.count });
       } else {
         announce(response.text);
       }
@@ -520,7 +541,7 @@ function BookingApp() {
             {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
             {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={() => { setLocationId(""); setCatalogMovies([]); }} />}
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
-            {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} onSelect={chooseShowtime} />}
+            {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} date={booking.date} onSelect={chooseShowtime} />}
             {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
             {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={review} />}
             {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
@@ -568,12 +589,48 @@ function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates:
   return <section><SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{dates.map((date, index) => <button type="button" key={date.value} onClick={() => onSelect(date.value)} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${selected === date.value ? "border-rose-400 bg-rose-500/20 text-white shadow-lg shadow-rose-500/10" : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/40"}`}><p className="text-xs text-slate-500">{index === 0 ? "Today" : index === 1 ? "Tomorrow" : date.weekday}</p><p className="mt-2 font-bold">{date.label}</p></button>)}</div></section>;
 }
 
-function ShowtimePicker({ movie, onSelect }: { movie: Movie; onSelect: (time: string) => void }) {
-  return <section><SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{movie.showtimes.map((time) => <button key={time} onClick={() => onSelect(time)} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"><span>{time}</span><ChevronRight className="h-4 w-4 text-rose-300" /></button>)}</div></section>;
+function ShowtimePicker({ movie, date, onSelect }: { movie: Movie; date: string; onSelect: (time: string) => void }) {
+  const times = movie.showtimesByDate?.[date] ?? [];
+  return <section><SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{times.length ? times.map(({ time }) => <button key={time} onClick={() => onSelect(time)} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"><span>{time}</span><ChevronRight className="h-4 w-4 text-rose-300" /></button>) : <p className="text-sm text-slate-400">No showtimes available on this date.</p>}</div></section>;
 }
 
-function TicketPicker({ onSelect }: { onSelect: (count: number) => void }) {
-  return <section><SectionTitle eyebrow="Step 04" title="How many tickets?" icon={<Ticket />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-5">{Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <button key={count} onClick={() => onSelect(count)} className="rounded-2xl border border-white/10 bg-white/[0.045] p-6 text-2xl font-bold transition hover:border-rose-400/50 hover:bg-rose-500/10">{count}</button>)}</div></section>;
+function TicketPicker({ onSelect }: { onSelect: (breakdown: Record<string, number>) => void }) {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const total = computeTicketCount(counts);
+  const totalPrice = computeTicketPrice(counts);
+
+  const adjust = (code: string, delta: number) => {
+    setCounts((prev) => {
+      const next = Math.max(0, Math.min(10, (prev[code] ?? 0) + delta));
+      return { ...prev, [code]: next };
+    });
+  };
+
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 04" title="How many tickets?" icon={<Ticket />} />
+      <div className="space-y-3">
+        {TICKET_TYPES.map((type) => (
+          <div key={type.code} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+            <div>
+              <p className="font-semibold text-white">{type.label}</p>
+              <p className="text-xs text-slate-400">${type.price.toFixed(2)} each</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => adjust(type.code, -1)} disabled={!counts[type.code]} className="h-9 w-9 rounded-xl border border-white/10 text-lg font-bold transition hover:border-rose-400/50 disabled:cursor-not-allowed disabled:opacity-30">−</button>
+              <span className="w-6 text-center text-lg font-bold">{counts[type.code] ?? 0}</span>
+              <button type="button" onClick={() => adjust(type.code, 1)} disabled={total >= 10} className="h-9 w-9 rounded-xl border border-white/10 text-lg font-bold transition hover:border-rose-400/50 disabled:cursor-not-allowed disabled:opacity-30">+</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm">
+        <span className="text-slate-400">{total} ticket{total === 1 ? "" : "s"} selected</span>
+        <span className="font-bold text-white">${totalPrice.toFixed(2)}</span>
+      </div>
+      <button onClick={() => onSelect(counts)} disabled={total < 1} className="mx-auto mt-5 block rounded-2xl bg-rose-500 px-6 py-3 font-semibold text-slate-950 transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-slate-500">Continue</button>
+    </section>
+  );
 }
 
 function SeatPicker({
@@ -676,7 +733,11 @@ function SeatPicker({
 }
 
 function Review({ booking, onConfirm, saving }: { booking: BookingState; onConfirm: () => void; saving: boolean }) {
-  return <section className="mx-auto max-w-xl"><SectionTitle eyebrow="Step 06" title="Review your booking" icon={<Ticket />} /><div className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.045] p-6 text-sm"><SummaryRow label="Movie" value={booking.movie?.title ?? ""} /><SummaryRow label="Date" value={booking.date ?? ""} /><SummaryRow label="Showtime" value={booking.showtime ?? ""} /><SummaryRow label="Tickets" value={String(booking.ticketCount)} /><SummaryRow label="Seats" value={booking.seats.map((seat) => `${seat.row}${seat.col}`).join(", ")} /><div className="my-4 border-t border-white/10" /><SummaryRow label="Total" value={`$${(booking.ticketCount * 14.99).toFixed(2)}`} strong /></div><button onClick={onConfirm} disabled={saving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-400 to-blue-500 py-3.5 font-bold text-slate-950 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60">{saving && <Loader2 className="h-4 w-4 animate-spin" />} {saving ? "Saving booking…" : "Confirm booking"}</button></section>;
+  const breakdownLabel = TICKET_TYPES
+    .filter((type) => (booking.ticketBreakdown[type.code] ?? 0) > 0)
+    .map((type) => `${booking.ticketBreakdown[type.code]} ${type.label}`)
+    .join(", ") || String(booking.ticketCount);
+  return <section className="mx-auto max-w-xl"><SectionTitle eyebrow="Step 06" title="Review your booking" icon={<Ticket />} /><div className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.045] p-6 text-sm"><SummaryRow label="Movie" value={booking.movie?.title ?? ""} /><SummaryRow label="Date" value={booking.date ?? ""} /><SummaryRow label="Showtime" value={booking.showtime ?? ""} /><SummaryRow label="Tickets" value={breakdownLabel} /><SummaryRow label="Seats" value={booking.seats.map((seat) => `${seat.row}${seat.col}`).join(", ")} /><div className="my-4 border-t border-white/10" /><SummaryRow label="Total" value={`$${computeTicketPrice(booking.ticketBreakdown).toFixed(2)}`} strong /></div><button onClick={onConfirm} disabled={saving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-400 to-blue-500 py-3.5 font-bold text-slate-950 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60">{saving && <Loader2 className="h-4 w-4 animate-spin" />} {saving ? "Saving booking…" : "Confirm booking"}</button></section>;
 }
 
 function Confirmation({ reference, onRestart }: { reference: string; onRestart: () => void }) {
