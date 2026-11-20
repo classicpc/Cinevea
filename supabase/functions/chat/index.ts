@@ -18,6 +18,8 @@ ACTION: {"type":"go_back"}
 ACTION: {"type":"restart"}
 Only emit an action when the user's intent is clear. Never invent IDs, dates, showtimes, or seat numbers.
 Use movie ids, YYYY-MM-DD dates and showtime strings exactly as they appear in the catalog. Only emit the action that matches the current booking step (select_movie at the start, then select_date, select_showtime, set_tickets, select_seats, confirm_booking). Only emit confirm_booking when the user explicitly confirms on the review step.
+For date requests, resolve relative words and labels such as "today", "tomorrow", "22nd", "Nov 22", and "November 22" only against catalog.dateLabels or catalog.dates. Never convert a bare number to a date unless it exactly matches a displayed day. If the catalog has no matching date, ask for clarification instead of emitting an action.
+For movie requests, map bare numbers and phrases such as "1", "movie 2", "number 3", or "the second movie" to that position in catalog.movies. Never guess a movie position outside the catalog length.
 `;
 
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";

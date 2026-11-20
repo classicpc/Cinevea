@@ -92,36 +92,66 @@ function findMovie(text: string, movies: Movie[]): Movie | null {
     const index = parseInt(numberMatch[1], 10) - 1;
     return movies[index] ?? null;
   }
+  const bareNumber = lower.match(/^\s*(\d{1,2})\s*(?:movie|film)?\s*[.!?]?\s*$/);
+  if (bareNumber) {
+    const index = parseInt(bareNumber[1], 10) - 1;
+    return movies[index] ?? null;
+  }
   return null;
 }
 
 function findDate(text: string): string | null {
   const dates = getDates();
   const lower = text.toLowerCase();
-  const weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-  const today = new Date();
   if (contains(text, "today")) {
     return dates[0].value;
   }
   if (contains(text, "tomorrow")) {
     return dates[1].value;
   }
-  // weekday match
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    const wd = weekdays[d.getDay()];
-    if (lower.includes(wd)) return dates[i].value;
-  }
-  // "nov 20", "november 20"
+
+  // Match exact ISO dates and the labels displayed in the date picker.
   for (const dt of dates) {
-    const parts = dt.value.split("-"); // YYYY-MM-DD
-    const monthDay = `${parseInt(parts[1])} ${parseInt(parts[2])}`;
-    if (lower.includes(monthDay)) return dt.value;
+    const [year, month, day] = dt.value.split("-").map((part) => parseInt(part, 10));
+    const date = new Date(year, month - 1, day);
+    const monthLabels = [
+      ["jan", "january"], ["feb", "february"], ["mar", "march"], ["apr", "april"],
+      ["may"], ["jun", "june"], ["jul", "july"], ["aug", "august"],
+      ["sep", "sept", "september"], ["oct", "october"], ["nov", "november"], ["dec", "december"],
+    ];
+    const names = monthLabels[date.getMonth()];
+    if (
+      lower.includes(dt.value)
+      || lower.includes(dt.label.toLowerCase())
+      || names.some((name) => lower.includes(`${name} ${day}`) || lower.includes(`${name}-${day}`))
+      || lower.includes(`${month}/${day}`)
+    ) {
+      return dt.value;
+    }
   }
+
+  // Match both short and full weekday names against the displayed dates.
+  for (const dt of dates) {
+    const date = new Date(`${dt.value}T12:00:00`);
+    const fullWeekday = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+    if (lower.includes(dt.weekday.toLowerCase()) || lower.includes(fullWeekday)) {
+      return dt.value;
+    }
+  }
+
+  // Match a bare day number or ordinal only when it is one of the displayed dates.
+  const dayMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
+  if (dayMatch) {
+    const day = parseInt(dayMatch[1], 10);
+    const match = dates.find((dt) => parseInt(dt.value.split("-")[2], 10) === day);
+    if (match) return match.value;
+  }
+
+  // Numbered date options are also accepted (1 through 7).
   const num = extractNumber(text);
   if (num && num >= 1 && num <= 7) {
-    return dates[num - 1].value;
+    const explicitOption = lower.match(/\b(?:date|day|option)\s*(\d)\b/);
+    if (explicitOption) return dates[parseInt(explicitOption[1], 10) - 1]?.value ?? null;
   }
   return null;
 }
@@ -420,6 +450,11 @@ export async function aiRespond(
         catalog: {
           today: dates[0].value,
           dates: dates.map((d) => d.value),
+          dateLabels: dates.map((d) => ({
+            value: d.value,
+            label: d.label,
+            weekday: d.weekday,
+          })),
           movies: movies.slice(0, 20).map((m) => ({
             id: m.id,
             title: m.title,
