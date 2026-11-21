@@ -578,9 +578,9 @@ function BookingApp() {
           </div>
           <Progress currentIndex={Math.max(0, currentIndex)} />
         </div>
-        <div className={`mt-[2vh] grid items-start gap-[2vw] ${assistantOpen ? "lg:grid-cols-[minmax(320px,38%)_minmax(0,1fr)]" : ""}`}>
-          {assistantOpen ? <aside className="sticky top-[5rem] flex h-[70dvh] min-h-[32rem] max-h-[44rem] flex-col overflow-hidden rounded-[clamp(1rem,2vw,1.75rem)] border border-slate-300/15 bg-[#242733] shadow-2xl shadow-slate-950/40 lg:h-[calc(100dvh-12rem)] lg:min-h-[34rem] lg:max-h-[calc(100dvh-12rem)]">
-            <div className="border-b border-white/10 bg-gradient-to-br from-slate-500/20 via-rose-400/10 to-transparent p-4">
+        <div className={`mt-[2vh] grid items-start gap-[2vw] ${assistantOpen ? "lg:grid-cols-[minmax(260px,30%)_minmax(0,1fr)]" : ""}`}>
+          {assistantOpen ? <aside className="sticky top-[5rem] flex h-[calc(100dvh-18rem)] min-h-[22rem] max-h-[calc(100dvh-18rem)] flex-col overflow-hidden rounded-[clamp(1rem,2vw,1.75rem)] border border-slate-300/15 bg-[#242733] shadow-2xl shadow-slate-950/40">
+            <div className="border-b border-white/10 bg-gradient-to-br from-slate-500/20 via-rose-400/10 to-transparent p-6">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-rose-300" /> Your booking concierge</span>
                 <div className="flex items-center gap-1">
@@ -592,8 +592,8 @@ function BookingApp() {
                   </button>
                 </div>
               </div>
-              <div className="mt-3 flex items-center gap-3">
-                <div className={`grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-slate-400 to-rose-400 text-slate-950 shadow-lg shadow-rose-500/20 ${speaking ? "animate-pulse" : ""}`}><Mic2 className="h-5 w-5" /></div>
+              <div className="mt-5 flex items-center gap-3">
+                <div className={`grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-slate-400 to-rose-400 text-slate-950 shadow-lg shadow-rose-500/20 ${speaking ? "animate-pulse" : ""}`}><Mic2 className="h-6 w-6" /></div>
                 <div><p className="font-semibold">{thinking ? "Thinking…" : speaking ? "Speaking…" : "Ready when you are"}</p><p className="text-xs text-slate-400">Type or use the microphone</p></div>
               </div>
             </div>
