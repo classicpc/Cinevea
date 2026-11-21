@@ -208,6 +208,9 @@ function listMovies(movies: Movie[]): string {
 }
 
 function listShowtimes(movie: Movie): string {
+  if (!movie.showtimes.length) {
+    return `There are no available showtimes for ${movie.title} on the selected date.`;
+  }
   return `Available showtimes for ${movie.title} are: ${movie.showtimes.join(", ")}.`;
 }
 
@@ -238,6 +241,16 @@ export function ruleBasedRespond(
     if (contains(text, "ticket")) return { text: "How many tickets would you like?", action: { type: "go_back" } };
     if (contains(text, "seat")) return { text: "Which seats would you like instead? Just tell me the row and number, like A5 or B3.", action: { type: "go_back" } };
     return { text: "Sure, let's go back a step.", action: { type: "go_back" } };
+  }
+  if (
+    state.step === "showtime"
+    && state.movie?.showtimes?.length === 0
+    && contains(text, "another", "different", "other", "next", "change", "date")
+  ) {
+    return {
+      text: "No problem. Let’s choose a date that has available showtimes.",
+      action: { type: "go_back" },
+    };
   }
 
   switch (state.step) {
@@ -292,8 +305,14 @@ export function ruleBasedRespond(
       if (date) {
         const dates = getDates();
         const dInfo = dates.find((d) => d.value === date);
+        const dateScopedMovie = state.movie
+          ? {
+              ...state.movie,
+              showtimes: (state.movie.showtimesByDate?.[date] ?? []).map((entry) => entry.time),
+            }
+          : null;
         return {
-          text: `Perfect — ${dInfo?.weekday}, ${dInfo?.label}. ${listShowtimes(state.movie!)}`,
+          text: `Perfect — ${dInfo?.weekday}, ${dInfo?.label}. ${dateScopedMovie ? listShowtimes(dateScopedMovie) : "There are no available showtimes on the selected date."}`,
           action: { type: "select_date", date },
         };
       }
@@ -303,6 +322,17 @@ export function ruleBasedRespond(
     }
 
     case "showtime": {
+      if (!state.movie?.showtimes.length) {
+        if (contains(text, "another", "different", "other", "next", "change", "date")) {
+          return {
+            text: "No problem. Let’s choose a date that has available showtimes.",
+            action: { type: "go_back" },
+          };
+        }
+        return {
+          text: "There are no available showtimes for the selected date. Say “change date” or “choose another date” to continue.",
+        };
+      }
       const st = findShowtime(text, state.movie);
       if (st) {
         return {

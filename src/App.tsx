@@ -267,7 +267,10 @@ function BookingApp() {
           const startDate = new Date(showtime.starts_at);
           const dateKey = toLocalDateKey(startDate);
           const time = formatShowtime(startDate);
-          (showtimesByDate[dateKey] ??= []).push({ time, id: showtime.id });
+          const entries = showtimesByDate[dateKey] ??= [];
+          if (!entries.some((entry) => entry.time === time)) {
+            entries.push({ time, id: showtime.id });
+          }
         }
         return {
           id: movie.id,
@@ -301,8 +304,15 @@ function BookingApp() {
   const chooseDate = useCallback((date: string, quiet = false) => {
     setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "showtime" }));
     const formatted = dates.find((item) => item.value === date)?.label ?? date;
-    if (!quiet) announce(`Showtimes for ${formatted} are now available. Choose a time.`);
-  }, [announce, dates]);
+    const hasShowtimes = (booking.movie?.showtimesByDate?.[date] ?? []).length > 0;
+    if (!quiet) {
+      announce(
+        hasShowtimes
+          ? `Showtimes for ${formatted} are now available. Choose a time.`
+          : `There are no available showtimes for ${formatted}. Choose another date or say “change date” to continue.`
+      );
+    }
+  }, [announce, booking.movie, dates]);
 
   const chooseShowtime = useCallback(async (showtime: string, quiet = false) => {
     const showtimeId = booking.date
@@ -475,6 +485,13 @@ function BookingApp() {
         const available = booking.date ? booking.movie?.showtimesByDate?.[booking.date] ?? [] : [];
         if (booking.step === "showtime" && available.some((entry) => entry.time === action.showtime)) {
           void chooseShowtime(action.showtime, true);
+        } else if (booking.step === "showtime") {
+          const availableTimes = available.map((entry) => entry.time);
+          announce(
+            availableTimes.length
+              ? `That showtime is not available for the selected date. Available times are: ${availableTimes.join(", ")}.`
+              : "There are no available showtimes for the selected date."
+          );
         }
         break;
       }
@@ -618,7 +635,14 @@ function BookingApp() {
             {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
             {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={() => { setLocationId(""); setCatalogMovies([]); }} />}
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
-            {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} date={booking.date} onSelect={chooseShowtime} />}
+            {booking.step === "showtime" && booking.movie && booking.date && (
+              <ShowtimePicker
+                movie={booking.movie}
+                date={booking.date}
+                onSelect={chooseShowtime}
+                onChangeDate={goBack}
+              />
+            )}
             {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
             {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={() => void review()} />}
             {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
@@ -666,12 +690,80 @@ function MoviePoster({ src, title }: { src: string; title: string }) {
 }
 
 function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates: ReturnType<typeof getDates>; selected: string | null; onSelect: (date: string) => void }) {
-  return <section><SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{dates.map((date, index) => <button type="button" key={date.value} onClick={() => onSelect(date.value)} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${selected === date.value ? "border-rose-400 bg-rose-500/20 text-white shadow-lg shadow-rose-500/10" : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/40"}`}><p className="text-xs text-slate-500">{index === 0 ? "Today" : index === 1 ? "Tomorrow" : date.weekday}</p><p className="mt-2 font-bold">{date.label}</p></button>)}</div></section>;
+  const availableDates = dates.filter((date) => (movie.showtimesByDate?.[date.value] ?? []).length > 0);
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} />
+      {availableDates.length ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          {availableDates.map((date) => (
+            <button
+              type="button"
+              key={date.value}
+              onClick={() => onSelect(date.value)}
+              className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${
+                selected === date.value
+                  ? "border-rose-400 bg-rose-500/20 text-white shadow-lg shadow-rose-500/10"
+                  : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/40"
+              }`}
+            >
+              <p className="text-xs text-slate-500">{date.weekday}</p>
+              <p className="mt-2 font-bold">{date.label}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5">
+          <p className="text-sm text-amber-100">This movie has no available showtimes in the next 7 days.</p>
+          <p className="mt-2 text-xs text-slate-400">Use “Start over” or type “restart” to choose another movie.</p>
+        </div>
+      )}
+    </section>
+  );
 }
 
-function ShowtimePicker({ movie, date, onSelect }: { movie: Movie; date: string; onSelect: (time: string) => void }) {
+function ShowtimePicker({
+  movie,
+  date,
+  onSelect,
+  onChangeDate,
+}: {
+  movie: Movie;
+  date: string;
+  onSelect: (time: string) => void;
+  onChangeDate: () => void;
+}) {
   const times = movie.showtimesByDate?.[date] ?? [];
-  return <section><SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{times.length ? times.map(({ time }) => <button key={time} onClick={() => onSelect(time)} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"><span>{time}</span><ChevronRight className="h-4 w-4 text-rose-300" /></button>) : <p className="text-sm text-slate-400">No showtimes available on this date.</p>}</div></section>;
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} />
+      {times.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {times.map(({ time }) => (
+            <button
+              key={time}
+              onClick={() => onSelect(time)}
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"
+            >
+              <span>{time}</span>
+              <ChevronRight className="h-4 w-4 text-rose-300" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5">
+          <p className="text-sm text-amber-100">No showtimes are available on this date.</p>
+          <button
+            type="button"
+            onClick={onChangeDate}
+            className="mt-4 rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-400"
+          >
+            Choose another date
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function TicketPicker({ onSelect }: { onSelect: (breakdown: Record<string, number>) => void }) {

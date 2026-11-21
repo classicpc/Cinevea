@@ -18,6 +18,8 @@ ACTION: {"type":"go_back"}
 ACTION: {"type":"restart"}
 Only emit an action when the user's intent is clear. Never invent IDs, dates, showtimes, or seat numbers.
 Use movie ids, YYYY-MM-DD dates and showtime strings exactly as they appear in the catalog. Only emit the action that matches the current booking step (select_movie at the start, then select_date, select_showtime, set_tickets, select_seats, confirm_booking). Only emit confirm_booking when the user explicitly confirms on the review step.
+At the showtime step, use only catalog.movies[].showtimesByDate[state.date]. Never list, suggest, or emit a showtime from another date or an unlisted showtime. If the selected date has no showtimes, say that no showtimes are available for that date and do not emit a select_showtime action.
+If the selected date has no showtimes, proactively offer to choose another date. If the user asks for another date, a different date, or says to change the date, emit go_back so the UI returns to date selection. Also offer restart as an alternative.
 For date requests, resolve relative words and labels such as "today", "tomorrow", "22nd", "Nov 22", and "November 22" only against catalog.dateLabels or catalog.dates. Never convert a bare number to a date unless it exactly matches a displayed day. If the catalog has no matching date, ask for clarification instead of emitting an action.
 For movie requests, map bare numbers and phrases such as "1", "movie 2", "number 3", or "the second movie" to that position in catalog.movies. Never guess a movie position outside the catalog length.
 `;
@@ -65,7 +67,7 @@ Deno.serve(async (request) => {
         messages: [
           {
             role: "system",
-            content: `You are Cinevea, a friendly movie booking assistant. Help users choose a movie, date, showtime, ticket count, seats, and confirm a booking. Keep responses concise (1-3 sentences) and never claim a booking is confirmed unless the user has explicitly confirmed it. Only state movie or showtime availability when supported by the catalog context below. If the context has no matching records, say that you could not find a matching live result. Dates must be chosen from catalog.dates. Current booking state: ${JSON.stringify(state)}. Catalog context: ${JSON.stringify(catalogContext)}. ${actionInstructions}`,
+            content: `You are Cinevea, a friendly movie booking assistant. Help users choose a movie, date, showtime, ticket count, seats, and confirm a booking. Keep responses concise (1-3 sentences) and never claim a booking is confirmed unless the user has explicitly confirmed it. Only state movie or showtime availability when supported by the catalog context below. If the context has no matching records, say that you could not find a matching live result. Dates must be chosen from catalog.dates. When state.date is set, only suggest or emit showtimes from catalog.movies for that exact YYYY-MM-DD date. Never show or accept a showtime from another date. Current booking state: ${JSON.stringify(state)}. Catalog context: ${JSON.stringify(catalogContext)}. ${actionInstructions}`,
           },
           ...history.map((message) => ({ role: message.role, content: message.text })),
           { role: "user", content: userText },
@@ -138,5 +140,36 @@ async function getCatalogContext(request: Request, userText: string) {
     console.error("Catalog context lookup failed", error.message);
     throw new Error("Could not retrieve live catalog context.");
   }
-  return { movies: data ?? [] };
+  const now = Date.now();
+  const dateFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Toronto",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Toronto",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  return {
+    movies: (data ?? []).map((movie: Record<string, unknown>) => {
+      const showtimesByDate: Record<string, { time: string; id: string }[]> = {};
+      for (const showtime of (movie.showtimes as Array<Record<string, unknown>> | undefined) ?? []) {
+        const startsAt = typeof showtime.starts_at === "string" ? showtime.starts_at : "";
+        const startDate = new Date(startsAt);
+        if (!startsAt || Number.isNaN(startDate.getTime()) || startDate.getTime() <= now) continue;
+        const dateParts = dateFormatter.formatToParts(startDate);
+        const part = (type: string) => dateParts.find((item) => item.type === type)?.value ?? "";
+        const dateKey = `${part("year")}-${part("month")}-${part("day")}`;
+        const time = timeFormatter.format(startDate);
+        const entries = showtimesByDate[dateKey] ??= [];
+        if (!entries.some((entry) => entry.time === time)) {
+          entries.push({ id: String(showtime.id), time });
+        }
+      }
+      return { ...movie, showtimesByDate };
+    }),
+  };
 }
