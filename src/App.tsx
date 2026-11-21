@@ -45,6 +45,26 @@ type SeatRecommendation = {
   score: number;
   explanation: string;
 };
+type LocationOption = { id: string; name: string; city: string; country: string };
+
+function findLocation(text: string, locations: LocationOption[]): LocationOption | null {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return null;
+
+  return locations.find((location) => {
+    const terms = [location.city, location.name]
+      .filter(Boolean)
+      .map((term) => term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim())
+      .filter((term) => term.length >= 3);
+    return terms.some((term) => normalized === term || normalized.includes(` ${term} `) || normalized.startsWith(`${term} `) || normalized.endsWith(` ${term}`));
+  }) ?? null;
+}
 /** Intl may emit narrow no-break spaces ("7:00\u202fPM"); normalise so showtimes compare and match typed text. */
 const formatShowtime = (date: Date) =>
   date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ");
@@ -161,7 +181,7 @@ function BookingApp() {
   const [speaking, setSpeaking] = useState(false);
   const [bookingRef, setBookingRef] = useState("");
   const [saving, setSaving] = useState(false);
-  const [locations, setLocations] = useState<Array<{ id: string; name: string; city: string; country: string }>>([]);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [catalogMovies, setCatalogMovies] = useState<Movie[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -289,6 +309,26 @@ function BookingApp() {
     }
     setCatalogLoading(false);
   }, []);
+
+  const changeLocation = useCallback(() => {
+    window.sessionStorage.removeItem("cinevea-location");
+    setLocationId("");
+    setCatalogMovies([]);
+    setCatalogError(null);
+    setCatalogLoading(false);
+    setSeatStatuses({});
+    setRecommendations([]);
+    setRecommendationIndex(0);
+    setBooking(initialBooking);
+  }, []);
+
+  useEffect(() => {
+    if (!locations.length || locationId) return;
+    const savedLocationId = window.sessionStorage.getItem("cinevea-location");
+    if (savedLocationId && locations.some((location) => location.id === savedLocationId)) {
+      void chooseLocation(savedLocationId);
+    }
+  }, [chooseLocation, locationId, locations]);
 
   const announce = useCallback((text: string) => {
     addMessage("assistant", text);
@@ -533,12 +573,20 @@ function BookingApp() {
     }
   }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, confirm, dates, goBack, restart, review, seatPreference, seatStatuses]);
 
-  const sendText = useCallback((text: string) => {
+  const sendText = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || thinking) return;
     addMessage("user", trimmed);
     speechController.stopSpeaking();
     setSpeaking(false);
+
+    const mentionedLocation = findLocation(trimmed, locations);
+    if (mentionedLocation) {
+      await chooseLocation(mentionedLocation.id);
+      setBooking(initialBooking);
+      announce(`Location set to ${mentionedLocation.name}, ${mentionedLocation.city}. Now choose a movie or ask me what is playing.`);
+      return;
+    }
 
     if (!locationId) {
       announce("Please choose a location first so I can show you the movies available at that theatre.");
@@ -576,7 +624,7 @@ function BookingApp() {
       })
       .catch(() => announce("Sorry, something went wrong. Please try again."))
       .finally(() => setThinking(false));
-  }, [announce, addMessage, booking, catalogLoading, catalogMovies, locationId, messages, runAssistantAction, thinking]);
+  }, [announce, addMessage, booking, catalogLoading, catalogMovies, chooseLocation, locationId, locations, messages, runAssistantAction, thinking]);
 
   return (
     <div className="min-h-screen bg-[#171923] text-slate-100">
@@ -633,7 +681,7 @@ function BookingApp() {
           <main className="min-h-[65dvh] overflow-y-auto rounded-[clamp(1rem,2vw,1.75rem)] border border-slate-300/15 bg-[#242733]/80 p-[clamp(1rem,2vw,2rem)] shadow-2xl shadow-slate-950/40">
             {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-rose-400/40 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}
             {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
-            {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={() => { setLocationId(""); setCatalogMovies([]); }} />}
+            {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={changeLocation} />}
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
             {booking.step === "showtime" && booking.movie && booking.date && (
               <ShowtimePicker
