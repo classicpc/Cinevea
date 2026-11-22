@@ -29,8 +29,10 @@ export type AssistantAction =
   | { type: "select_movie"; movieId: string }
   | { type: "select_date"; date: string }
   | { type: "select_showtime"; showtime: string }
-  | { type: "set_tickets"; count: number }
-  | { type: "select_seats"; seats: string[] }
+  | { type: "set_tickets"; count: number; breakdown?: Record<string, number> }
+  | { type: "select_seats"; seats: string[]; preference?: "middle" | "front" | "back" | "center" }
+  | { type: "view_alternative" }
+  | { type: "review_booking" }
   | { type: "confirm_booking" }
   | { type: "go_back" }
   | { type: "restart" }
@@ -49,50 +51,223 @@ function contains(text: string, ...words: string[]): boolean {
   });
 }
 
+const WORD_TO_NUM: Record<string, number> = {
+  a: 1,
+  an: 1,
+  one: 1,
+  won: 1,
+  two: 2,
+  to: 2,
+  too: 2,
+  three: 3,
+  tree: 3,
+  free: 3,
+  four: 4,
+  for: 4,
+  fore: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  ate: 8,
+  nine: 9,
+  ten: 10,
+  tin: 10,
+};
+
+function wordOrDigitToNum(str: string): number | null {
+  const s = str.trim().toLowerCase();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (WORD_TO_NUM[s]) return WORD_TO_NUM[s];
+  return null;
+}
+
+const TYPE_SYNONYMS: Record<string, string[]> = {
+  adult: ["adults", "adult", "regular", "standard", "grownup", "grown-up"],
+  senior: ["seniors", "senior", "elderly", "elder", "elders", "65+"],
+  child: ["children", "child", "kids", "kid", "under 12"],
+  student: ["students", "student", "youths", "youth"],
+};
+
+export function parseTicketBreakdown(
+  text: string
+): { breakdown: Record<string, number>; total: number } | null {
+  let lower = text.toLowerCase().trim();
+  // Strip conversational speech filler words (never strip 'for' or 'to' which are number homophones)
+  lower = lower.replace(
+    /^(?:yeah|yes|yep|sure|please|ok|okay|um|uh|i want|give me|can i get|can i have|we need|i need|book|get me|make it|set it to|actually)\s+/i,
+    ""
+  );
+
+  const breakdown: Record<string, number> = { adult: 0, senior: 0, child: 0, student: 0 };
+  let foundSpecific = false;
+  const numPattern =
+    "(?:\\d+|a|an|one|won|two|to|too|three|tree|free|four|for|fore|five|six|seven|eight|ate|nine|ten|tin)";
+
+  let remaining = lower;
+
+  for (const [code, synonyms] of Object.entries(TYPE_SYNONYMS)) {
+    for (const syn of synonyms) {
+      // 1. "2 adults" or "four adults" or "for adults"
+      const re1 = new RegExp(`\\b(${numPattern})\\s*(?:x|-|:)?\\s*${syn}\\b`, "i");
+      const m1 = remaining.match(re1);
+      if (m1) {
+        const val = wordOrDigitToNum(m1[1]);
+        if (val !== null) {
+          breakdown[code] += val;
+          foundSpecific = true;
+          remaining = remaining.replace(m1[0], " ");
+        }
+      }
+      // 2. "adults 2" or "adult: 2"
+      const re2 = new RegExp(`\\b${syn}\\s*(?:x|-|:)?\\s*(${numPattern})\\b`, "i");
+      const m2 = remaining.match(re2);
+      if (m2) {
+        const val = wordOrDigitToNum(m2[1]);
+        if (val !== null) {
+          breakdown[code] += val;
+          foundSpecific = true;
+          remaining = remaining.replace(m2[0], " ");
+        }
+      }
+    }
+  }
+
+  // 3. For any remaining standalone category word without an explicit number (e.g. "and child", "child", "kid")
+  for (const [code, synonyms] of Object.entries(TYPE_SYNONYMS)) {
+    for (const syn of synonyms) {
+      const reStandalone = new RegExp(`\\b${syn}\\b`, "i");
+      if (reStandalone.test(remaining)) {
+        breakdown[code] += 1;
+        foundSpecific = true;
+        remaining = remaining.replace(reStandalone, " ");
+      }
+    }
+  }
+
+  const result: Record<string, number> = {};
+  for (const [k, v] of Object.entries(breakdown)) {
+    if (v > 0) result[k] = v;
+  }
+
+  if (foundSpecific && Object.keys(result).length > 0) {
+    const total = Object.values(result).reduce((a, b) => a + b, 0);
+    return { breakdown: result, total };
+  }
+
+  const generalMatch = lower.match(
+    new RegExp(`\\b(${numPattern})\\s*(?:tickets?|seats?|people|persons?)?\\b`)
+  );
+  if (generalMatch) {
+    const val = wordOrDigitToNum(generalMatch[1]);
+    if (val !== null && val >= 1) {
+      return { breakdown: { adult: val }, total: val };
+    }
+  }
+
+  return null;
+}
+
+export function formatBreakdownSummary(breakdown: Record<string, number>): string {
+  const labels: Record<string, string> = {
+    adult: "Adult",
+    senior: "Senior",
+    child: "Child",
+    student: "Student",
+  };
+  return Object.entries(breakdown)
+    .filter(([, count]) => count > 0)
+    .map(([code, count]) => `${count} ${labels[code] ?? code}${count > 1 ? (code === "child" ? "ren" : "s") : ""}`)
+    .join(", ");
+}
+
 function extractNumber(text: string): number | null {
   const lower = text.toLowerCase();
-  const wordMap: Record<string, number> = {
-    one: 1,
-    two: 2,
-    three: 3,
-    four: 4,
-    five: 5,
-    six: 6,
-    seven: 7,
-    eight: 8,
-    nine: 9,
-    ten: 10,
-  };
   // Digits win over words; words must be whole words ("someone" is not "one").
   const match = lower.match(/\d+/);
   if (match) return parseInt(match[0], 10);
-  for (const [word, num] of Object.entries(wordMap)) {
+  for (const [word, num] of Object.entries(WORD_TO_NUM)) {
     if (new RegExp(`\\b${word}\\b`).test(lower)) return num;
   }
   return null;
 }
 
+function canonicalizeMovieTitle(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(
+      /^(?:i want to watch|i want to see|can we see|can we watch|showtimes for|let'?s see|let'?s watch|book|tickets for|how about|we want|i'?d like to see|movie|film)\s+/i,
+      ""
+    )
+    .replace(/&/g, " and ")
+    .replace(/\bpart\s+(?:two|ii)\b/g, "part 2")
+    .replace(/\bpart\s+(?:one|i)\b/g, "part 1")
+    .replace(/\bpart\s+(?:three|iii)\b/g, "part 3")
+    .replace(/\bii\b/g, "2")
+    .replace(/\biii\b/g, "3")
+    .replace(/\biv\b/g, "4")
+    .replace(/\bv\b/g, "5")
+    .replace(/\bvi\b/g, "6")
+    .replace(/\bvii\b/g, "7")
+    .replace(/\bviii\b/g, "8")
+    .replace(/\bix\b/g, "9")
+    .replace(/\bx\b/g, "10")
+    .replace(/\btwo\b/g, "2")
+    .replace(/\bthree\b/g, "3")
+    .replace(/\bfour\b/g, "4")
+    .replace(/\bfive\b/g, "5")
+    .replace(/spider[-\s]?man/g, "spiderman")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function findMovie(text: string, movies: Movie[]): Movie | null {
-  const lower = text.toLowerCase();
-  // exact title match first
+  const normInput = canonicalizeMovieTitle(text);
+  if (!normInput) return null;
+
+  // 1. Direct and bidirectional title match
   for (const m of movies) {
-    if (lower.includes(m.title.toLowerCase())) return m;
+    const normM = canonicalizeMovieTitle(m.title);
+    if (normInput === normM || normInput.includes(normM) || normM.includes(normInput)) {
+      return m;
+    }
   }
-  // genre-based match
+
+  // 2. Significant words in common
+  const stopWords = new Set(["the", "and", "part", "for", "movie", "film"]);
+  const inputWords = normInput.split(" ").filter((w) => w.length >= 3 && !stopWords.has(w));
+  for (const m of movies) {
+    const mWords = canonicalizeMovieTitle(m.title).split(" ").filter((w) => w.length >= 3 && !stopWords.has(w));
+    if (inputWords.length > 0 && inputWords.every((w) => mWords.includes(w))) {
+      return m;
+    }
+  }
+
+  // 3. Prominent single-word match (e.g. "gladiator", "deadpool", "wolverine", "batman", "oppenheimer", "wicked", "dune")
+  for (const w of inputWords) {
+    if (w.length >= 4) {
+      const candidate = movies.find((m) => canonicalizeMovieTitle(m.title).includes(w));
+      if (candidate) return candidate;
+    }
+  }
+
+  // 4. Genre-based match
   for (const m of movies) {
     if (contains(text, m.genre.toLowerCase())) return m;
   }
-  // ordinal/number match: "first movie", "movie 2", "number 3"
+
+  // 5. Ordinal / number match: "first movie", "movie 2", "number 3", bare number "1"
   const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
   for (let i = 0; i < ordinalWords.length; i++) {
-    if (lower.includes(`${ordinalWords[i]} movie`)) return movies[i] ?? null;
+    if (text.toLowerCase().includes(`${ordinalWords[i]} movie`)) return movies[i] ?? null;
   }
-  const numberMatch = lower.match(/(?:movie|number)\s+(\d+)/);
+  const numberMatch = text.toLowerCase().match(/(?:movie|number)\s+(\d+)/);
   if (numberMatch) {
     const index = parseInt(numberMatch[1], 10) - 1;
     return movies[index] ?? null;
   }
-  const bareNumber = lower.match(/^\s*(\d{1,2})\s*(?:movie|film)?\s*[.!?]?\s*$/);
+  const bareNumber = text.match(/^\s*(\d{1,2})\s*(?:movie|film)?\s*[.!?]?\s*$/);
   if (bareNumber) {
     const index = parseInt(bareNumber[1], 10) - 1;
     return movies[index] ?? null;
@@ -100,59 +275,112 @@ function findMovie(text: string, movies: Movie[]): Movie | null {
   return null;
 }
 
-function findDate(text: string): string | null {
+export function findDate(text: string, movie?: Movie | null): string | null {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return null;
+
   const dates = getDates();
-  const lower = text.toLowerCase();
-  if (contains(text, "today")) {
-    return dates[0].value;
+  const movieDates = movie?.showtimesByDate ? Object.keys(movie.showtimesByDate) : [];
+  const allDateKeys = Array.from(new Set([...movieDates, ...dates.map((d) => d.value)])).sort();
+  if (!allDateKeys.length) return null;
+
+  const dateObjects = allDateKeys.map((val) => {
+    const [y, m, d] = val.split("-").map(Number);
+    const date = new Date(y, m - 1, d, 12, 0, 0);
+    const weekdayFull = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
+    const weekdayShort = date.toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
+    const monthFull = date.toLocaleDateString("en-US", { month: "long" }).toLowerCase();
+    const monthShort = date.toLocaleDateString("en-US", { month: "short" }).toLowerCase();
+    return {
+      value: val,
+      year: y,
+      month: m,
+      day: d,
+      weekdayFull,
+      weekdayShort,
+      monthFull,
+      monthShort,
+      label: `${monthShort} ${d}`,
+    };
+  });
+
+  // 1. Relative keywords: today, tonight, tomorrow
+  if (/\b(today|tonight)\b/.test(lower)) {
+    return dateObjects[0]?.value ?? null;
   }
-  if (contains(text, "tomorrow")) {
-    return dates[1].value;
+  if (/\b(tomorrow)\b/.test(lower)) {
+    return dateObjects[1]?.value ?? null;
   }
 
-  // Match exact ISO dates and the labels displayed in the date picker.
-  for (const dt of dates) {
-    const [year, month, day] = dt.value.split("-").map((part) => parseInt(part, 10));
-    const date = new Date(year, month - 1, day);
-    const monthLabels = [
-      ["jan", "january"], ["feb", "february"], ["mar", "march"], ["apr", "april"],
-      ["may"], ["jun", "june"], ["jul", "july"], ["aug", "august"],
-      ["sep", "sept", "september"], ["oct", "october"], ["nov", "november"], ["dec", "december"],
-    ];
-    const names = monthLabels[date.getMonth()];
+  // 2. Exact ISO value or slash date match: "2026-11-22", "2026/11/22"
+  for (const obj of dateObjects) {
+    if (lower.includes(obj.value) || lower.includes(obj.value.replace(/-/g, "/"))) {
+      return obj.value;
+    }
+  }
+
+  // 3. Month + Day in any order: e.g. "nov 22", "november 22nd", "22 nov", "22nd of november"
+  for (const obj of dateObjects) {
+    const dayPattern = `\\b0?${obj.day}(?:st|nd|rd|th)?\\b`;
+    const monthPattern = `\\b(${obj.monthShort}|${obj.monthFull})\\b`;
+    const r1 = new RegExp(`${monthPattern}.*?${dayPattern}`);
+    const r2 = new RegExp(`${dayPattern}.*?${monthPattern}`);
+    if (r1.test(lower) || r2.test(lower)) {
+      return obj.value;
+    }
+  }
+
+  // 4. Numeric month/day formats: M/D, D/M, M-D, D-M, M.D, D.M
+  for (const obj of dateObjects) {
+    const p1 = new RegExp(`\\b0?${obj.month}[/.-]0?${obj.day}\\b`);
+    const p2 = new RegExp(`\\b0?${obj.day}[/.-]0?${obj.month}\\b`);
+    if (p1.test(lower) || p2.test(lower)) {
+      return obj.value;
+    }
+  }
+
+  // 5. Weekday match: e.g. "Friday", "fri", "this Friday"
+  for (const obj of dateObjects) {
     if (
-      lower.includes(dt.value)
-      || lower.includes(dt.label.toLowerCase())
-      || names.some((name) => lower.includes(`${name} ${day}`) || lower.includes(`${name}-${day}`))
-      || lower.includes(`${month}/${day}`)
+      new RegExp(`\\b${obj.weekdayFull}\\b`).test(lower) ||
+      new RegExp(`\\b${obj.weekdayShort}\\b`).test(lower)
     ) {
-      return dt.value;
+      return obj.value;
     }
   }
 
-  // Match both short and full weekday names against the displayed dates.
-  for (const dt of dates) {
-    const date = new Date(`${dt.value}T12:00:00`);
-    const fullWeekday = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-    if (lower.includes(dt.weekday.toLowerCase()) || lower.includes(fullWeekday)) {
-      return dt.value;
-    }
-  }
-
-  // Match a bare day number or ordinal only when it is one of the displayed dates.
-  const dayMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
-  if (dayMatch) {
-    const day = parseInt(dayMatch[1], 10);
-    const match = dates.find((dt) => parseInt(dt.value.split("-")[2], 10) === day);
+  // 6. Bare day number or ordinal: e.g. "22", "22nd"
+  const bareDayMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
+  if (bareDayMatch) {
+    const dayNum = parseInt(bareDayMatch[1], 10);
+    const match = dateObjects.find((d) => d.day === dayNum && (movie?.showtimesByDate?.[d.value]?.length ?? 0) > 0)
+      ?? dateObjects.find((d) => d.day === dayNum);
     if (match) return match.value;
   }
 
-  // Numbered date options are also accepted (1 through 7).
-  const num = extractNumber(text);
-  if (num && num >= 1 && num <= 7) {
-    const explicitOption = lower.match(/\b(?:date|day|option)\s*(\d)\b/);
-    if (explicitOption) return dates[parseInt(explicitOption[1], 10) - 1]?.value ?? null;
+  // 7. Option number: "option 1", "date 2", "1", "2", "first date", "second"
+  const optionMatch = lower.match(/\b(?:option|date|choice|day|number|#)\s*(\d)\b/);
+  if (optionMatch) {
+    const idx = parseInt(optionMatch[1], 10) - 1;
+    if (idx >= 0 && idx < dateObjects.length) {
+      return dateObjects[idx].value;
+    }
   }
+  const bareNumMatch = lower.match(/^\s*(\d)\s*[.!?]?\s*$/);
+  if (bareNumMatch) {
+    const idx = parseInt(bareNumMatch[1], 10) - 1;
+    if (idx >= 0 && idx < dateObjects.length) {
+      return dateObjects[idx].value;
+    }
+  }
+
+  const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh"];
+  for (let i = 0; i < ordinalWords.length; i++) {
+    if (new RegExp(`\\b${ordinalWords[i]}\\b`).test(lower) && i < dateObjects.length) {
+      return dateObjects[i].value;
+    }
+  }
+
   return null;
 }
 
@@ -187,18 +415,81 @@ function findShowtime(text: string, movie: Movie | null): string | null {
   return null;
 }
 
+const ROW_WORDS: Record<string, string> = {
+  a: "A",
+  b: "B", be: "B", bee: "B",
+  c: "C", see: "C", sea: "C",
+  d: "D", dee: "D",
+  e: "E",
+  f: "F",
+  g: "G", gee: "G",
+  h: "H", aitch: "H",
+};
+
+const NUM_WORDS: Record<string, number> = {
+  "1": 1, one: 1, won: 1,
+  "2": 2, two: 2, to: 2, too: 2,
+  "3": 3, three: 3, tree: 3, free: 3,
+  "4": 4, four: 4, for: 4, fore: 4,
+  "5": 5, five: 5,
+  "6": 6, six: 6,
+  "7": 7, seven: 7,
+  "8": 8, eight: 8, ate: 8,
+  "9": 9, nine: 9,
+  "10": 10, ten: 10,
+  "11": 11, eleven: 11,
+  "12": 12, twelve: 12,
+};
+
 function parseSeats(text: string): string[] | null {
-  const lower = text.toUpperCase().replace(/\s+/g, " ").trim();
-  // match patterns like A1, B5, etc
-  const matches = lower.matchAll(/([A-H])(\d{1,2})/g);
+  let normalized = text.toLowerCase().trim();
+  // Strip seat/row noise words that appear in spoken input
+  normalized = normalized.replace(/\b(?:seat|seats|row|rows)\s*/g, " ");
+
+  const rowKeys = Object.keys(ROW_WORDS).join("|");
+  const numKeys = Object.keys(NUM_WORDS).join("|");
+
+  const pattern = new RegExp(`\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\b`, "g");
   const seats: string[] = [];
-  for (const m of matches) {
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(normalized)) !== null) {
+    const row = ROW_WORDS[match[1]];
+    const col = NUM_WORDS[match[2]];
+    if (row && col >= 1 && col <= SEAT_COLS) {
+      const code = `${row}${col}`;
+      if (!seats.includes(code)) seats.push(code);
+    }
+  }
+
+  // Handle row with multiple columns: e.g. "b 3 and 4"
+  const multiPattern = new RegExp(`\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\s*(?:and|,|&)\\s*(${numKeys})\\b`, "g");
+  let multiMatch: RegExpExecArray | null;
+  while ((multiMatch = multiPattern.exec(normalized)) !== null) {
+    const row = ROW_WORDS[multiMatch[1]];
+    const col1 = NUM_WORDS[multiMatch[2]];
+    const col2 = NUM_WORDS[multiMatch[3]];
+    if (row && col1 >= 1 && col1 <= SEAT_COLS) {
+      const code1 = `${row}${col1}`;
+      if (!seats.includes(code1)) seats.push(code1);
+    }
+    if (row && col2 >= 1 && col2 <= SEAT_COLS) {
+      const code2 = `${row}${col2}`;
+      if (!seats.includes(code2)) seats.push(code2);
+    }
+  }
+
+  const upper = text.toUpperCase();
+  const directMatches = upper.matchAll(/([A-H])(\d{1,2})/g);
+  for (const m of directMatches) {
     const row = m[1];
     const col = parseInt(m[2], 10);
     if (SEAT_ROWS.includes(row) && col >= 1 && col <= SEAT_COLS) {
-      seats.push(`${row}${col}`);
+      const code = `${row}${col}`;
+      if (!seats.includes(code)) seats.push(code);
     }
   }
+
   return seats.length > 0 ? seats : null;
 }
 
@@ -212,6 +503,23 @@ function listShowtimes(movie: Movie): string {
     return `There are no available showtimes for ${movie.title} on the selected date.`;
   }
   return `Available showtimes for ${movie.title} are: ${movie.showtimes.join(", ")}.`;
+}
+
+export function parseSeatPreference(text: string): "middle" | "front" | "back" | "center" | null {
+  const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/\b(front|first rows?|near the screen|close to (the )?screen)\b/i.test(lower)) {
+    return "front";
+  }
+  if (/\b(back|rear|last rows?|further back|far from (the )?screen)\b/i.test(lower)) {
+    return "back";
+  }
+  if (/\b(center|centre|horizontal center|dead center)\b/i.test(lower)) {
+    return "center";
+  }
+  if (/\b(middle|mid|center rows?|middle rows?)\b/i.test(lower)) {
+    return "middle";
+  }
+  return null;
 }
 
 // ---------- Rule-based engine ----------
@@ -229,7 +537,7 @@ export function ruleBasedRespond(
   // Global commands
   if (contains(text, "restart", "start over", "cancel", "reset", "begin again")) {
     return {
-      text: "No problem! Let's start fresh. Which movie would you like to see? Here are the options:\n" + listMovies(movies),
+      text: "No problem! Let's start fresh. First, please choose your theater location.",
       action: { type: "restart" },
     };
   }
@@ -238,7 +546,16 @@ export function ruleBasedRespond(
     if (contains(text, "movie")) return { text: "Sure, which movie would you like instead?\n" + listMovies(movies), action: { type: "go_back" } };
     if (contains(text, "date")) return { text: "No problem. Which date works better for you?", action: { type: "go_back" } };
     if (contains(text, "showtime", "time")) return { text: "Sure, which showtime would you prefer?", action: { type: "go_back" } };
-    if (contains(text, "ticket")) return { text: "How many tickets would you like?", action: { type: "go_back" } };
+    if (contains(text, "ticket")) {
+      const parsed = parseTicketBreakdown(text);
+      if (parsed && parsed.total >= 1 && parsed.total <= 10) {
+        return {
+          text: `Got it — updated to ${formatBreakdownSummary(parsed.breakdown)}. Let's pick your seats.`,
+          action: { type: "set_tickets", count: parsed.total, breakdown: parsed.breakdown },
+        };
+      }
+      return { text: "How many tickets would you like? You can specify age groups like '2 adult 4 child' or 'adult 2'.", action: { type: "go_back" } };
+    }
     if (contains(text, "seat")) return { text: "Which seats would you like instead? Just tell me the row and number, like A5 or B3.", action: { type: "go_back" } };
     return { text: "Sure, let's go back a step.", action: { type: "go_back" } };
   }
@@ -301,10 +618,15 @@ export function ruleBasedRespond(
     }
 
     case "date": {
-      const date = findDate(text);
+      const date = findDate(text, state.movie);
       if (date) {
         const dates = getDates();
         const dInfo = dates.find((d) => d.value === date);
+        const [y, m, d] = date.split("-").map(Number);
+        const dtObj = new Date(y, m - 1, d, 12, 0, 0);
+        const weekday = dInfo?.weekday ?? dtObj.toLocaleDateString("en-US", { weekday: "short" });
+        const monthShort = dtObj.toLocaleDateString("en-US", { month: "short" });
+        const label = dInfo?.label ?? `${monthShort} ${d}`;
         const dateScopedMovie = state.movie
           ? {
               ...state.movie,
@@ -312,12 +634,14 @@ export function ruleBasedRespond(
             }
           : null;
         return {
-          text: `Perfect — ${dInfo?.weekday}, ${dInfo?.label}. ${dateScopedMovie ? listShowtimes(dateScopedMovie) : "There are no available showtimes on the selected date."}`,
+          text: `Perfect — ${weekday}, ${label}. ${dateScopedMovie ? listShowtimes(dateScopedMovie) : "There are no available showtimes on the selected date."}`,
           action: { type: "select_date", date },
         };
       }
+      const dates = getDates();
+      const sample = dates.slice(0, 3).map((d) => `"${d.label}"`).join(", ");
       return {
-        text: `I didn't catch the date. You can say "today", "tomorrow", a weekday like "Friday", or a date like "November 20". Which day works for you?`,
+        text: `I didn't catch the date. You can say "today", "tomorrow", a weekday like "Friday", a date like ${sample}, or a day number. Which day works for you?`,
       };
     }
 
@@ -346,24 +670,123 @@ export function ruleBasedRespond(
     }
 
     case "tickets": {
-      const num = extractNumber(text);
-      if (num && num >= 1 && num <= 10) {
-        return {
-          text: `Got it — ${num} ticket${num > 1 ? "s" : ""}. Now let's pick your seats. The theater has rows A through H, 12 seats per row. You can say seat numbers like "A5" or "B3 and B4", or say "pick for me" and I'll select the best available seats.`,
-          action: { type: "set_tickets", count: num },
-        };
+      const parsed = parseTicketBreakdown(text);
+      if (parsed) {
+        if (parsed.total > 10) {
+          return { text: "I can only book up to 10 tickets at a time. How many tickets would you like?" };
+        }
+        if (parsed.total >= 1) {
+          const summary = formatBreakdownSummary(parsed.breakdown);
+          return {
+            text: `Got it — ${summary} (${parsed.total} ticket${parsed.total > 1 ? "s" : ""} total). Now let's pick your seats. The theater has rows A through H, 12 seats per row. You can say seat numbers like "A5" or "B3 and B4", or say "pick for me" and I'll select the best available seats.`,
+            action: { type: "set_tickets", count: parsed.total, breakdown: parsed.breakdown },
+          };
+        }
       }
-      if (num && num > 10) {
-        return { text: "I can only book up to 10 tickets at a time. How many tickets would you like?" };
-      }
-      return { text: "How many tickets would you like? You can say a number from 1 to 10." };
+      return { text: "How many tickets would you like? You can say a number from 1 to 10, or specify age groups like '2 adult 4 child' or 'adult 2'." };
     }
 
     case "seats": {
-      if (contains(text, "pick for me", "choose for me", "any seat", "best seat", "don't care", "whatever")) {
+      // Check if user asks for an alternative seat recommendation
+      if (
+        contains(
+          text,
+          "view alternate",
+          "view alternative",
+          "show alternate",
+          "show alternative",
+          "see alternate",
+          "see alternative",
+          "alternative",
+          "alternate",
+          "another option",
+          "other option",
+          "different option",
+          "next option",
+          "other seats",
+          "different seats",
+          "another seat",
+          "next alternative",
+          "try different seats"
+        )
+      ) {
         return {
-          text: `Let me pick some great seats for you. I've selected the best available seats in the middle of the theater. Does that work for you, or would you like to change them?`,
-          action: { type: "select_seats", seats: [] }, // empty = auto-pick signal
+          text: "Showing alternative seats for you.",
+          action: { type: "view_alternative" },
+        };
+      }
+
+      const pref = parseSeatPreference(text);
+      const isFindBest = contains(
+        text,
+        "find best seat",
+        "find best seats",
+        "select best seat",
+        "select best seats",
+        "pick best",
+        "choose best",
+        "pick for me",
+        "choose for me",
+        "any seat",
+        "best seat",
+        "best seats",
+        "don't care",
+        "whatever",
+        "find seats",
+        "pick seats"
+      ) || (pref !== null && contains(text, "seat", "seats", "prefer", "preference", "pick", "find", "choose", "get", "row", "rows"));
+
+      // 1. Check if user wants both find/select best seats AND review
+      if (
+        (isFindBest && contains(text, "review", "move forward", "continue", "proceed", "next")) ||
+        contains(text, "select best seats and review", "find best seats and review")
+      ) {
+        return {
+          text: "Selecting the best available seats and proceeding to review your booking.",
+          action: { type: "review_booking" },
+        };
+      }
+
+      // 2. Check if user wants to review booking / move forward
+      if (
+        contains(
+          text,
+          "review booking",
+          "review my booking",
+          "review",
+          "move forward",
+          "proceed",
+          "continue",
+          "next",
+          "confirm seats",
+          "go to review"
+        )
+      ) {
+        return {
+          text: "Let's review your booking.",
+          action: { type: "review_booking" },
+        };
+      }
+
+      // 3. Check if user is updating ticket count
+      const ticketsCheck = parseTicketBreakdown(text);
+      if (ticketsCheck && ticketsCheck.total >= 1) {
+        if (ticketsCheck.total > 10) {
+          return { text: "I can only book up to 10 tickets at a time. How many tickets would you like?" };
+        }
+        const summary = formatBreakdownSummary(ticketsCheck.breakdown);
+        return {
+          text: `Got it — updated to ${summary} (${ticketsCheck.total} ticket${ticketsCheck.total > 1 ? "s" : ""} total). Now let's pick your seats. The theater has rows A through H, 12 seats per row. You can say seat numbers like "A5" or "B3 and B4", say "find best seats", or say "review booking".`,
+          action: { type: "set_tickets", count: ticketsCheck.total, breakdown: ticketsCheck.breakdown },
+        };
+      }
+
+      // 4. Check if user asks to find/select best seats or states seat preference
+      if (isFindBest || pref !== null) {
+        const prefLabel = pref ? ` with preference for ${pref === "front" ? "front rows" : pref === "back" ? "back rows" : pref === "center" ? "horizontal center" : "middle rows"}` : "";
+        return {
+          text: `Finding the best available seats${prefLabel} for you. Say 'review booking' when you're ready to proceed, or choose different seats on the map.`,
+          action: { type: "select_seats", seats: [], preference: pref ?? undefined },
         };
       }
       const seats = parseSeats(text);
@@ -379,7 +802,7 @@ export function ruleBasedRespond(
         };
       }
       return {
-        text: `I didn't catch those seat numbers. You can say a seat like "A5" or multiple like "B3, B4, and B5". Or say "pick for me" and I'll choose the best available seats.`,
+        text: `I didn't catch those seat numbers. You can say seat numbers like "A5" or "B3 and B4", specify preferences like "middle", "front", or "back", or say "review booking" to continue.`,
       };
     }
 
@@ -403,7 +826,7 @@ export function ruleBasedRespond(
     case "confirmed": {
       if (contains(text, "yes", "another", "sure", "book again", "new booking")) {
         return {
-          text: `Let's book another movie! Which one would you like to see?\n${listMovies(movies)}`,
+          text: "Let's book another movie! First, please choose your theater location.",
           action: { type: "restart" },
         };
       }
@@ -420,7 +843,7 @@ export function ruleBasedRespond(
 
 const ACTION_TYPES = new Set([
   "select_movie", "select_date", "select_showtime", "set_tickets",
-  "select_seats", "confirm_booking", "go_back", "restart",
+  "select_seats", "view_alternative", "review_booking", "confirm_booking", "go_back", "restart",
 ]);
 
 /**

@@ -80,7 +80,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
     : text;
 
   return (
-    <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#091525]/95 px-4 py-4 backdrop-blur-xl">
+    <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#0a0c16]/95 px-4 py-4 backdrop-blur-2xl">
       {/* Mic error banner */}
       {micError && (
         <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400 animate-fade-in">
@@ -102,9 +102,9 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           onClick={toggleListening}
           className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
             isListening
-              ? "bg-red-500 hover:bg-red-600 animate-pulse"
+              ? "bg-gradient-to-r from-rose-500 to-red-600 shadow-lg shadow-rose-500/50 animate-pulse text-white"
               : voiceSupported
-              ? "bg-slate-800 hover:bg-slate-700 text-slate-300"
+              ? "bg-slate-800/90 hover:bg-rose-500/20 hover:border-rose-400/50 hover:text-white text-slate-200 border border-white/10"
               : "bg-slate-800 text-slate-500 hover:bg-slate-700"
           }`}
           aria-label={isListening ? "Stop listening" : "Start voice input"}
@@ -134,10 +134,10 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
             }
             disabled={disabled && !isListening}
             aria-label="Message the Cinevea assistant"
-            className="w-full rounded-xl border border-white/10 bg-white/[0.07] px-4 py-3 text-sm text-slate-100 placeholder-slate-500 transition-all focus:border-amber-300/60 focus:outline-none focus:ring-2 focus:ring-amber-300/20"
+            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-slate-100 placeholder-slate-400 transition-all focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
           />
           {isListening && interim && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-cyan-400">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-rose-400">
               live
             </span>
           )}
@@ -150,8 +150,8 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           disabled={disabled}
           className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
             ttsEnabled
-              ? "bg-cyan-600 hover:bg-cyan-500 text-white"
-              : "bg-slate-800 hover:bg-slate-700 text-slate-400"
+              ? "bg-rose-500/25 text-rose-300 border border-rose-500/40"
+              : "bg-slate-800/90 hover:bg-slate-700 text-slate-400 border border-white/10"
           }`}
           title={ttsEnabled ? "Mute voice" : "Unmute voice"}
         >
@@ -162,7 +162,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
         <button
           type="submit"
           disabled={disabled || !text.trim()}
-          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-lg shadow-cyan-500/20"
+          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-lg shadow-rose-500/25"
         >
           <Send className="w-5 h-5 text-white" />
         </button>
@@ -173,7 +173,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
         </p>
       )}
       {isListening && (
-        <p className="mt-2 px-1 text-xs text-cyan-300" role="status" aria-live="polite">
+        <p className="mt-2 px-1 text-xs font-medium text-rose-300" role="status" aria-live="polite">
           Listening — speak now
         </p>
       )}
