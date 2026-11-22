@@ -10,16 +10,16 @@ export function Header() {
   const initials = email.slice(0, 2).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between px-5 py-3 border-b border-rose-500/15 bg-[#0a0c14]/90 backdrop-blur-2xl relative shadow-lg shadow-black/20">
-      <div className="flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-rose-500/30">
-          <Film className="w-5 h-5 text-white" />
+    <header className="sticky top-0 z-30 flex items-center justify-between px-5 py-3 border-b border-rose-500/15 bg-[#080a11]/90 backdrop-blur-2xl relative shadow-lg shadow-black/30">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-600 to-red-700 border border-rose-400/30 flex items-center justify-center shadow-md shadow-rose-950/60">
+          <Film className="w-5 h-5 text-white drop-shadow-sm" />
         </div>
         <div>
-          <h1 className="text-lg font-extrabold tracking-tight leading-none bg-gradient-to-r from-white via-rose-100 to-pink-200 bg-clip-text text-transparent">
+          <h1 className="text-lg font-black tracking-tight leading-none text-white">
             Cinevea
           </h1>
-          <p className="text-[11px] text-rose-300/80 leading-none mt-0.5 font-medium">
+          <p className="text-[11px] text-rose-400 leading-none mt-1 font-semibold tracking-wide">
             Voice-Interactive Booking
           </p>
         </div>
@@ -31,7 +31,7 @@ export function Header() {
             onClick={() => setMenuOpen(!menuOpen)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 transition-all"
           >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center text-xs font-bold text-white shadow-md shadow-rose-500/20">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-rose-600 to-red-700 border border-white/10 flex items-center justify-center text-xs font-bold text-white shadow-md shadow-rose-950/40">
               {initials}
             </div>
             <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
@@ -41,7 +41,7 @@ export function Header() {
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900/95 rounded-xl border border-rose-500/20 shadow-2xl z-20 overflow-hidden animate-fade-in backdrop-blur-xl">
                 <div className="px-4 py-3 border-b border-white/10">
-                  <p className="text-xs text-rose-300/80">Signed in as</p>
+                  <p className="text-xs text-rose-400 font-medium">Signed in as</p>
                   <p className="text-sm text-white truncate font-medium">{email}</p>
                 </div>
                 <button

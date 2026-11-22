@@ -162,7 +162,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
         <button
           type="submit"
           disabled={disabled || !text.trim()}
-          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-lg shadow-rose-500/25"
+          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-rose-950/40"
         >
           <Send className="w-5 h-5 text-white" />
         </button>

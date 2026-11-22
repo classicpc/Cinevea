@@ -32,30 +32,32 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0c14] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background ambient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#0a0c14] via-[#101322] to-rose-950/20" />
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl" />
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-[#080a11] flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Background ambient lighting */}
+      <div className="absolute inset-0 bg-gradient-to-b from-rose-950/20 via-[#080a11] to-[#080a11]" />
+      <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-rose-600/15 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-indigo-600/10 rounded-full blur-[90px] pointer-events-none" />
 
       <div className="relative w-full max-w-md">
         {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600 flex items-center justify-center shadow-2xl shadow-rose-500/30 mb-3">
-            <Film className="w-8 h-8 text-white" />
+        <div className="flex flex-col items-center mb-7">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-600 to-red-700 border border-rose-400/30 flex items-center justify-center shadow-xl shadow-rose-950/60 mb-3.5 transition-transform hover:scale-105">
+            <Film className="w-8 h-8 text-white drop-shadow-md" />
           </div>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight bg-gradient-to-r from-white via-rose-100 to-pink-200 bg-clip-text text-transparent">Cinevea</h1>
-          <p className="text-sm text-rose-300/80 mt-1">Voice-Interactive Movie Booking</p>
+          <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-sm">Cinevea</h1>
+          <p className="text-xs font-semibold text-rose-400 tracking-wider uppercase mt-1">Voice-Interactive Movie Booking</p>
         </div>
 
         {/* Card */}
-        <div className="bg-[#121422]/90 backdrop-blur-2xl rounded-2xl border border-rose-500/20 shadow-2xl shadow-rose-950/30 p-6">
+        <div className="bg-[#111424]/90 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl shadow-black/80 p-7 ring-1 ring-white/5">
           {/* Tabs */}
-          <div className="flex gap-2 mb-5 p-1 bg-white/[0.04] rounded-xl border border-white/5">
+          <div className="flex gap-2 mb-6 p-1 bg-black/40 rounded-xl border border-white/5">
             <button
               onClick={() => { setMode("login"); setError(null); }}
               className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                mode === "login" ? "bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-lg shadow-rose-500/25" : "text-slate-400 hover:text-white"
+                mode === "login"
+                  ? "bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-950/60"
+                  : "text-slate-400 hover:text-white font-medium"
               }`}
             >
               Sign In
@@ -63,7 +65,9 @@ export function AuthScreen() {
             <button
               onClick={() => { setMode("signup"); setError(null); }}
               className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
-                mode === "signup" ? "bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-lg shadow-rose-500/25" : "text-slate-400 hover:text-white"
+                mode === "signup"
+                  ? "bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-950/60"
+                  : "text-slate-400 hover:text-white font-medium"
               }`}
             >
               Sign Up
@@ -72,24 +76,24 @@ export function AuthScreen() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Email</label>
+              <label className="text-xs font-medium text-slate-300 mb-1.5 block">Email</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   required
-                  className="w-full pl-10 pr-4 py-2.5 bg-white/[0.05] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-400 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#171a2e] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500 transition-all text-sm"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Password</label>
+              <label className="text-xs font-medium text-slate-300 mb-1.5 block">Password</label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="password"
                   value={password}
@@ -97,7 +101,7 @@ export function AuthScreen() {
                   placeholder={mode === "signup" ? "At least 6 characters" : "Your password"}
                   required
                   minLength={6}
-                  className="w-full pl-10 pr-4 py-2.5 bg-white/[0.05] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/40 focus:border-rose-400 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#171a2e] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500 transition-all text-sm"
                 />
               </div>
             </div>
@@ -115,7 +119,7 @@ export function AuthScreen() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-rose-500/30 transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-[0.99] disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-rose-950/60 transition-all flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -132,7 +136,7 @@ export function AuthScreen() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-600 mt-4">
+        <p className="text-center text-xs text-slate-500 mt-5">
           Cinevea — SOFE 4850U UX Design Final Project
         </p>
       </div>

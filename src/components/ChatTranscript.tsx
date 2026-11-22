@@ -34,7 +34,7 @@ export function ChatTranscript({ messages, onSpeak }: ChatTranscriptProps) {
           <div
             className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
               msg.role === "assistant"
-                ? "bg-gradient-to-br from-rose-500 to-pink-600 shadow-md shadow-rose-500/25"
+                ? "bg-gradient-to-br from-rose-600 to-red-600 shadow-md shadow-rose-950/50 border border-rose-400/20"
                 : "bg-slate-700 border border-slate-600"
             }`}
           >
