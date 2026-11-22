@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from 'node:url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [react()],
   envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   resolve: {
