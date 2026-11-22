@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <!-- Background Badge -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bg)" stroke="#fde68a" stroke-opacity="0.4" stroke-width="2"/>
+  
+  <!-- Film Strip / Reel Icon -->
+  <g fill="#090d16" filter="url(#glow)">
+    <!-- Film Outer Frame -->
+    <rect x="15" y="16" width="34" height="32" rx="4" fill="none" stroke="#090d16" stroke-width="3"/>
+    <!-- Film divider lines -->
+    <line x1="23" y1="16" x2="23" y2="48" stroke="#090d16" stroke-width="2.5"/>
+    <line x1="41" y1="16" x2="41" y2="48" stroke="#090d16" stroke-width="2.5"/>
+    <line x1="23" y1="32" x2="41" y2="32" stroke="#090d16" stroke-width="2.5"/>
+    
+    <!-- Perforation dots Left -->
+    <rect x="17" y="19" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="17" y="25" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="17" y="31" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="17" y="37" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="17" y="43" width="3.5" height="3" rx="1" fill="#090d16"/>
+
+    <!-- Perforation dots Right -->
+    <rect x="43.5" y="19" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="43.5" y="25" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="43.5" y="31" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="43.5" y="37" width="3.5" height="3" rx="1" fill="#090d16"/>
+    <rect x="43.5" y="43" width="3.5" height="3" rx="1" fill="#090d16"/>
+
+    <!-- Center Play triangle in screen -->
+    <polygon points="30,28 36,32 30,36" fill="#090d16"/>
+  </g>
+</svg>

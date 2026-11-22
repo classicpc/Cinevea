@@ -1,0 +1,19 @@
+name: Refresh MovieGlu movie details
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh cached movie details
+        env:
+          SUPABASE_FUNCTION_URL: https://uysoywezkpcarytujspw.supabase.co/functions/v1/sync-movieglu
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST "$SUPABASE_FUNCTION_URL" \
+            --header "Content-Type: application/json" \
+            --data '{"mode":"refreshMovieDetails","latitude":43.6532,"longitude":-79.3832}'
