@@ -102,9 +102,9 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           onClick={toggleListening}
           className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
             isListening
-              ? "bg-gradient-to-r from-rose-500 to-red-600 shadow-lg shadow-rose-500/50 animate-pulse text-white"
+              ? "bg-gradient-to-r from-amber-500 to-amber-600 shadow-md shadow-amber-500/30 animate-pulse text-slate-950"
               : voiceSupported
-              ? "bg-slate-800/90 hover:bg-rose-500/20 hover:border-rose-400/50 hover:text-white text-slate-200 border border-white/10"
+              ? "bg-slate-800/90 hover:bg-amber-500/15 hover:border-amber-400/40 hover:text-amber-300 text-slate-200 border border-white/10"
               : "bg-slate-800 text-slate-500 hover:bg-slate-700"
           }`}
           aria-label={isListening ? "Stop listening" : "Start voice input"}
@@ -116,7 +116,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
               : "Voice input is not supported in this browser"
           }
         >
-          {isListening ? <MicOff className="w-5 h-5 text-white" /> : <Mic className="w-5 h-5" />}
+          {isListening ? <MicOff className="w-5 h-5 text-slate-950" /> : <Mic className="w-5 h-5" />}
         </button>
 
         {/* Text input */}
@@ -134,10 +134,10 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
             }
             disabled={disabled && !isListening}
             aria-label="Message the Cinevea assistant"
-            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-slate-100 placeholder-slate-400 transition-all focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+            className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder-slate-400 transition-all focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
           />
           {isListening && interim && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-rose-400">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-amber-400">
               live
             </span>
           )}
@@ -150,7 +150,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
           disabled={disabled}
           className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
             ttsEnabled
-              ? "bg-rose-500/25 text-rose-300 border border-rose-500/40"
+              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
               : "bg-slate-800/90 hover:bg-slate-700 text-slate-400 border border-white/10"
           }`}
           title={ttsEnabled ? "Mute voice" : "Unmute voice"}
@@ -162,9 +162,9 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
         <button
           type="submit"
           disabled={disabled || !text.trim()}
-          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-rose-950/40"
+          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-amber-950/30"
         >
-          <Send className="w-5 h-5 text-white" />
+          <Send className="w-5 h-5 text-slate-950" />
         </button>
       </form>
       {!voiceSupported && (
@@ -173,7 +173,7 @@ export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }:
         </p>
       )}
       {isListening && (
-        <p className="mt-2 px-1 text-xs font-medium text-rose-300" role="status" aria-live="polite">
+        <p className="mt-2 px-1 text-xs font-medium text-amber-400" role="status" aria-live="polite">
           Listening — speak now
         </p>
       )}

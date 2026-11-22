@@ -32,31 +32,30 @@ export function AuthScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-[#080a11] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background ambient lighting */}
-      <div className="absolute inset-0 bg-gradient-to-b from-rose-950/20 via-[#080a11] to-[#080a11]" />
-      <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-rose-600/15 rounded-full blur-[100px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-indigo-600/10 rounded-full blur-[90px] pointer-events-none" />
+    <div className="min-h-screen bg-[#090d16] flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Background ambient lighting - subtle and warm */}
+      <div className="absolute inset-0 bg-gradient-to-b from-amber-500/[0.05] via-[#090d16] to-[#090d16]" />
+      <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[550px] h-[320px] bg-amber-500/[0.07] rounded-full blur-[110px] pointer-events-none" />
 
       <div className="relative w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center mb-7">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-rose-600 to-red-700 border border-rose-400/30 flex items-center justify-center shadow-xl shadow-rose-950/60 mb-3.5 transition-transform hover:scale-105">
-            <Film className="w-8 h-8 text-white drop-shadow-md" />
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 border border-amber-400/40 flex items-center justify-center shadow-lg shadow-amber-950/40 mb-3.5 transition-transform hover:scale-105">
+            <Film className="w-8 h-8 text-slate-950 stroke-[2.2]" />
           </div>
-          <h1 className="text-3xl font-black text-white tracking-tight drop-shadow-sm">Cinevea</h1>
-          <p className="text-xs font-semibold text-rose-400 tracking-wider uppercase mt-1">Voice-Interactive Movie Booking</p>
+          <h1 className="text-3xl font-black text-white tracking-tight">Cinevea</h1>
+          <p className="text-xs font-semibold text-amber-400/90 tracking-wider uppercase mt-1">Voice-Interactive Movie Booking</p>
         </div>
 
         {/* Card */}
-        <div className="bg-[#111424]/90 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl shadow-black/80 p-7 ring-1 ring-white/5">
+        <div className="bg-slate-900/85 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl shadow-black/60 p-7 ring-1 ring-white/5">
           {/* Tabs */}
-          <div className="flex gap-2 mb-6 p-1 bg-black/40 rounded-xl border border-white/5">
+          <div className="flex gap-2 mb-6 p-1 bg-slate-950/60 rounded-xl border border-white/5">
             <button
               onClick={() => { setMode("login"); setError(null); }}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
                 mode === "login"
-                  ? "bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-950/60"
+                  ? "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-sm"
                   : "text-slate-400 hover:text-white font-medium"
               }`}
             >
@@ -64,9 +63,9 @@ export function AuthScreen() {
             </button>
             <button
               onClick={() => { setMode("signup"); setError(null); }}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${
                 mode === "signup"
-                  ? "bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-md shadow-rose-950/60"
+                  ? "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-sm"
                   : "text-slate-400 hover:text-white font-medium"
               }`}
             >
@@ -85,7 +84,7 @@ export function AuthScreen() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   required
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#171a2e] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all text-sm"
                 />
               </div>
             </div>
@@ -101,7 +100,7 @@ export function AuthScreen() {
                   placeholder={mode === "signup" ? "At least 6 characters" : "Your password"}
                   required
                   minLength={6}
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#171a2e] text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500 transition-all text-sm"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 text-slate-100 placeholder-slate-500 rounded-xl border border-white/10 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all text-sm"
                 />
               </div>
             </div>
@@ -119,7 +118,7 @@ export function AuthScreen() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-[0.99] disabled:opacity-50 text-white font-semibold text-sm shadow-lg shadow-rose-950/60 transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 active:scale-[0.99] disabled:opacity-50 text-slate-950 font-bold text-sm shadow-md shadow-amber-950/30 transition-all flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -128,7 +127,7 @@ export function AuthScreen() {
                 </>
               ) : (
                 <>
-                  <User className="w-4 h-4" />
+                  <User className="w-4 h-4 text-slate-950" />
                   {mode === "login" ? "Sign In" : "Create Account"}
                 </>
               )}

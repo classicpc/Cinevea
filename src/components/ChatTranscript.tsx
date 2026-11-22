@@ -34,12 +34,12 @@ export function ChatTranscript({ messages, onSpeak }: ChatTranscriptProps) {
           <div
             className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
               msg.role === "assistant"
-                ? "bg-gradient-to-br from-rose-600 to-red-600 shadow-md shadow-rose-950/50 border border-rose-400/20"
+                ? "bg-gradient-to-br from-amber-500 to-amber-600 shadow-sm border border-amber-400/30 text-slate-950"
                 : "bg-slate-700 border border-slate-600"
             }`}
           >
             {msg.role === "assistant" ? (
-              <Sparkles className="w-4 h-4 text-white" />
+              <Sparkles className="w-4 h-4 text-slate-950" />
             ) : (
               <User className="w-4 h-4 text-slate-200" />
             )}
@@ -48,7 +48,7 @@ export function ChatTranscript({ messages, onSpeak }: ChatTranscriptProps) {
             className={`max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
               msg.role === "assistant"
                 ? "bg-white/[0.06] text-slate-100 rounded-tl-sm border border-white/10 shadow-sm backdrop-blur-md"
-                : "bg-gradient-to-r from-rose-500 to-pink-600 text-white rounded-tr-sm shadow-md shadow-rose-500/20"
+                : "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-medium rounded-tr-sm shadow-sm"
             }`}
           >
             <span>{msg.text}</span>
@@ -56,7 +56,7 @@ export function ChatTranscript({ messages, onSpeak }: ChatTranscriptProps) {
               <button
                 type="button"
                 onClick={() => onSpeak(msg.text)}
-                className="ml-2 inline-flex rounded p-1 text-rose-300/80 transition hover:bg-white/10 hover:text-white"
+                className="ml-2 inline-flex rounded p-1 text-amber-400 transition hover:bg-white/10 hover:text-white"
                 aria-label="Read response aloud"
                 title="Read response aloud"
               >

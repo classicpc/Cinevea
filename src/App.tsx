@@ -167,7 +167,7 @@ function App() {
 
   if (!isSupabaseConfigured) return <SetupScreen />;
   if (loading) {
-    return <div className="min-h-screen bg-slate-950 grid place-items-center"><Loader2 className="animate-spin text-rose-400" /></div>;
+    return <div className="min-h-screen bg-slate-950 grid place-items-center"><Loader2 className="animate-spin text-amber-400" /></div>;
   }
   return session ? <BookingApp /> : <AuthScreen />;
 }
@@ -176,10 +176,10 @@ function SetupScreen() {
   return (
     <main className="min-h-screen bg-slate-950 text-white grid place-items-center p-6">
       <section className="max-w-lg rounded-3xl border border-white/10 bg-white/[0.05] p-8 shadow-2xl">
-        <div className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-rose-500"><Film /></div>
+        <div className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950"><Film /></div>
         <h1 className="text-2xl font-bold">Cinevea setup required</h1>
         <p className="mt-3 text-sm leading-6 text-slate-400">Add your Supabase connection settings to <code>.env.local</code>, then reload the app.</p>
-        <pre className="mt-5 rounded-2xl bg-slate-950 p-4 text-xs text-rose-300">{`VITE_SUPABASE_URL=...
+        <pre className="mt-5 rounded-2xl bg-slate-950 p-4 text-xs text-amber-400">{`VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...`}</pre>
       </section>
     </main>
@@ -781,29 +781,29 @@ function BookingApp() {
   }, [announce, addMessage, booking, catalogLoading, catalogMovies, chooseLocation, locationId, locations, messages, runAssistantAction, thinking]);
 
   return (
-    <div className="min-h-screen bg-[#0a0c14] text-slate-100">
+    <div className="min-h-screen bg-[#090d16] text-slate-100">
       <Header />
       <div className="mx-auto w-full max-w-[1440px] px-[4vw] py-[2vh]">
-        <div className="sticky top-[3.6rem] z-20 mb-[2vh] border-b border-rose-500/15 bg-[#0a0c14]/90 pb-[1vh] pt-[1vh] backdrop-blur-2xl">
+        <div className="sticky top-[3.6rem] z-20 mb-[2vh] border-b border-white/10 bg-[#090d16]/90 pb-[1vh] pt-[1vh] backdrop-blur-2xl">
           <div className="flex items-end justify-between gap-4 pb-[1vh]">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.28em] text-rose-400">Cinevea Cinemas · Online booking</p>
-            <h1 className="mt-2 text-[clamp(1.7rem,3vw,2.5rem)] font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-rose-200 bg-clip-text text-transparent">Your next great night out.</h1>
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-amber-400">Cinevea Cinemas · Online booking</p>
+            <h1 className="mt-2 text-[clamp(1.7rem,3vw,2.5rem)] font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-amber-200 bg-clip-text text-transparent">Your next great night out.</h1>
             <p className="mt-2 max-w-xl text-sm text-slate-300">Reserve seats in seconds, with a personal assistant to guide every step.</p>
           </div>
-          <button onClick={restart} className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-slate-300 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-white">
+          <button onClick={restart} className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-slate-300 transition hover:border-amber-400/50 hover:bg-amber-500/10 hover:text-white">
             Start over
           </button>
           </div>
           <Progress currentIndex={Math.max(0, currentIndex)} />
         </div>
         <div className={`mt-[2vh] grid items-start gap-[2vw] ${assistantOpen ? "lg:grid-cols-[minmax(260px,30%)_minmax(0,1fr)]" : ""}`}>
-          {assistantOpen ? <aside className="sticky top-[5rem] flex h-[calc(100dvh-18rem)] min-h-[22rem] max-h-[calc(100dvh-18rem)] flex-col overflow-hidden rounded-[clamp(1rem,2vw,1.75rem)] border border-rose-500/20 bg-[#121422]/90 shadow-2xl shadow-rose-950/30 backdrop-blur-xl">
-            <div className="border-b border-white/10 bg-gradient-to-br from-rose-500/20 via-pink-500/10 to-indigo-500/10 p-6">
+          {assistantOpen ? <aside className="sticky top-[5rem] flex h-[calc(100dvh-18rem)] min-h-[22rem] max-h-[calc(100dvh-18rem)] flex-col overflow-hidden rounded-[clamp(1rem,2vw,1.75rem)] border border-white/10 bg-slate-900/90 shadow-2xl shadow-black/50 backdrop-blur-xl">
+            <div className="border-b border-white/10 bg-gradient-to-br from-amber-500/10 via-slate-800/30 to-transparent p-6">
               <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-rose-400" /> Your booking concierge</span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-amber-400" /> Your booking concierge</span>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => setTts((value) => !value)} className={`rounded-lg p-2 ${tts ? "bg-rose-500/25 text-rose-300 border border-rose-500/40" : "bg-white/5 text-slate-400 hover:text-white"}`} title="Toggle spoken responses">
+                  <button onClick={() => setTts((value) => !value)} className={`rounded-lg p-2 ${tts ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "bg-white/5 text-slate-400 hover:text-white"}`} title="Toggle spoken responses">
                     {tts ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
                   </button>
                   <button onClick={() => setAssistantOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white" title="Minimize assistant" aria-label="Minimize assistant">
@@ -812,8 +812,8 @@ function BookingApp() {
                 </div>
               </div>
               <div className="mt-5 flex items-center gap-3">
-                <div className={`grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-rose-600 to-red-700 border border-rose-400/20 text-white shadow-lg shadow-rose-950/50 ${speaking ? "animate-pulse" : ""}`}><Mic2 className="h-6 w-6" /></div>
-                <div><p className="font-semibold text-white">{thinking ? "Thinking…" : speaking ? "Speaking…" : "Ready when you are"}</p><p className="text-xs text-rose-300">Type or use the microphone</p></div>
+                <div className={`grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 border border-amber-400/30 text-slate-950 font-bold shadow-md shadow-amber-950/30 ${speaking ? "animate-pulse" : ""}`}><Mic2 className="h-6 w-6 stroke-[2.2]" /></div>
+                <div><p className="font-semibold text-white">{thinking ? "Thinking…" : speaking ? "Speaking…" : "Ready when you are"}</p><p className="text-xs text-slate-400">Type or use the microphone</p></div>
               </div>
             </div>
             <ChatTranscript
@@ -831,9 +831,9 @@ function BookingApp() {
               ttsEnabled={tts}
               onToggleTts={() => setTts((value) => !value)}
             />
-          </aside> : <button onClick={() => setAssistantOpen(true)} className="fixed bottom-6 right-6 z-20 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-rose-600 to-red-600 text-white shadow-xl shadow-rose-950/50 transition hover:scale-105 hover:brightness-110" title="Open AI assistant" aria-label="Open AI assistant"><Sparkles className="h-6 w-6" /></button>}
-          <main className="min-h-[65dvh] overflow-y-auto rounded-[clamp(1rem,2vw,1.75rem)] border border-rose-500/20 bg-[#121422]/90 p-[clamp(1rem,2vw,2rem)] shadow-2xl shadow-rose-950/30 backdrop-blur-xl">
-            {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm text-slate-300 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}
+          </aside> : <button onClick={() => setAssistantOpen(true)} className="fixed bottom-6 right-6 z-20 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-amber-500 to-amber-600 text-slate-950 shadow-xl shadow-amber-950/40 transition hover:scale-105 hover:brightness-110" title="Open AI assistant" aria-label="Open AI assistant"><Sparkles className="h-6 w-6" /></button>}
+          <main className="min-h-[65dvh] overflow-y-auto rounded-[clamp(1rem,2vw,1.75rem)] border border-white/10 bg-slate-900/90 p-[clamp(1rem,2vw,2rem)] shadow-2xl shadow-black/50 backdrop-blur-xl">
+            {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-sm text-slate-300 transition hover:border-amber-400/50 hover:bg-amber-500/10 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}
             {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
             {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={changeLocation} />}
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
@@ -857,13 +857,13 @@ function BookingApp() {
 }
 
 function Progress({ currentIndex }: { currentIndex: number }) {
-  return <div className="flex items-center gap-1 overflow-x-auto pb-1">{["Movie", "Date", "Time", "Tickets", "Seats", "Review", "Done"].map((label, index) => <div key={label} className="flex min-w-[78px] flex-1 items-center gap-1">{<div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold transition-all ${index < currentIndex ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/25" : index === currentIndex ? "bg-gradient-to-r from-rose-600 to-red-600 text-white ring-4 ring-rose-500/20 shadow-md shadow-rose-950/40" : "bg-white/10 text-slate-500"}`}>{index < currentIndex ? <Check className="h-4 w-4" /> : index + 1}</div>}<span className={`hidden text-xs sm:block ${index === currentIndex ? "font-bold text-rose-400" : "text-slate-500"}`}>{label}</span>{index < 6 && <div className={`h-px flex-1 ${index < currentIndex ? "bg-emerald-500/80" : "bg-white/10"}`} />}</div>)}</div>;
+  return <div className="flex items-center gap-1 overflow-x-auto pb-1">{["Movie", "Date", "Time", "Tickets", "Seats", "Review", "Done"].map((label, index) => <div key={label} className="flex min-w-[78px] flex-1 items-center gap-1">{<div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold transition-all ${index < currentIndex ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/25" : index === currentIndex ? "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 ring-4 ring-amber-500/20 shadow-sm" : "bg-white/10 text-slate-500"}`}>{index < currentIndex ? <Check className="h-4 w-4" /> : index + 1}</div>}<span className={`hidden text-xs sm:block ${index === currentIndex ? "font-bold text-amber-400" : "text-slate-500"}`}>{label}</span>{index < 6 && <div className={`h-px flex-1 ${index < currentIndex ? "bg-emerald-500/80" : "bg-white/10"}`} />}</div>)}</div>;
 }
 
 function LocationPicker({ locations, loading, error, onSelect }: { locations: Array<{ id: string; name: string; city: string; country: string }>; loading: boolean; error: string | null; onSelect: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const matches = locations.filter((location) => `${location.name} ${location.city} ${location.country}`.toLowerCase().includes(query.toLowerCase()));
-  return <section className="mx-auto max-w-3xl"><SectionTitle eyebrow="Start here" title="Choose your location" icon={<CalendarDays />} /><p className="mb-5 text-sm text-slate-300">Search a city to see its live movies, theatres, and showtimes.</p><label className="relative mb-5 block"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Ontario locations…" aria-label="Search locations" className="w-full rounded-2xl border border-white/10 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-400 focus:border-rose-400 focus:ring-2 focus:ring-rose-500/20" /></label>{loading && <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-rose-400" /> Loading locations…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !locations.length && <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-5 text-sm text-rose-100">No live locations have been imported yet.</div>}{!loading && !error && locations.length > 0 && !matches.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400">No matching locations.</div>}<div className="grid gap-3 sm:grid-cols-2">{matches.map((location) => <button key={location.id} onClick={() => onSelect(location.id)} className="rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left transition hover:-translate-y-0.5 hover:border-rose-400/60 hover:bg-gradient-to-br hover:from-rose-500/15 hover:to-transparent hover:shadow-lg hover:shadow-rose-500/10"><p className="font-semibold text-white">{location.name}</p><p className="mt-1 text-sm text-rose-200/70">{location.city}, {location.country}</p></button>)}</div></section>;
+  return <section className="mx-auto max-w-3xl"><SectionTitle eyebrow="Start here" title="Choose your location" icon={<CalendarDays />} /><p className="mb-5 text-sm text-slate-300">Search a city to see its live movies, theatres, and showtimes.</p><label className="relative mb-5 block"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Ontario locations…" aria-label="Search locations" className="w-full rounded-2xl border border-white/10 bg-slate-950/60 py-3 pl-11 pr-4 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20" /></label>{loading && <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-amber-400" /> Loading locations…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !locations.length && <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5 text-sm text-amber-100">No live locations have been imported yet.</div>}{!loading && !error && locations.length > 0 && !matches.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400">No matching locations.</div>}<div className="grid gap-3 sm:grid-cols-2">{matches.map((location) => <button key={location.id} onClick={() => onSelect(location.id)} className="rounded-2xl border border-white/10 bg-slate-950/40 p-5 text-left transition hover:-translate-y-0.5 hover:border-amber-400/50 hover:bg-amber-500/10"><p className="font-semibold text-white">{location.name}</p><p className="mt-1 text-sm text-slate-400">{location.city}, {location.country}</p></button>)}</div></section>;
 }
 
 function MoviePicker({ movies, loading, error, onSelect, onChangeLocation }: { movies: Movie[]; loading: boolean; error: string | null; onSelect: (movie: Movie) => void; onChangeLocation: () => void }) {
@@ -877,16 +877,16 @@ function MoviePicker({ movies, loading, error, onSelect, onChangeLocation }: { m
     .filter((movie) => genre === "All" || movie.genre === genre)
     .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : b.showtimes.length - a.showtimes.length);
   const scrollCarousel = (amount: number) => carouselRef.current?.scrollBy({ left: amount, behavior: "smooth" });
-  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm font-medium text-rose-300 hover:text-white transition">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.06] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-400 focus:border-rose-400 focus:ring-2 focus:ring-rose-500/20" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3"><SlidersHorizontal className="h-4 w-4 text-rose-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.06] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-rose-400" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="relative">{visibleMovies.length > 0 && <><button type="button" onClick={() => scrollCarousel(-340)} aria-label="Previous movies" className="absolute left-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-rose-400/30 bg-slate-900/90 text-rose-300 shadow-xl shadow-black/40 hover:bg-rose-500 hover:text-white hover:border-rose-400 transition"><ChevronLeft className="h-5 w-5" /></button><button type="button" onClick={() => scrollCarousel(340)} aria-label="Next movies" className="absolute right-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-rose-400/30 bg-slate-900/90 text-rose-300 shadow-xl shadow-black/40 hover:bg-rose-500 hover:text-white hover:border-rose-400 transition" ><ChevronRight className="h-5 w-5" /></button></>}<div ref={carouselRef} className="flex snap-x snap-mandatory gap-[1.2vw] overflow-x-auto px-1 pb-4 scrollbar-thin">{visibleMovies.map((movie) => {
+  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm font-medium text-amber-400 hover:text-amber-300 transition">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-slate-950/60 py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-amber-400 focus:ring-2 focus:ring-amber-500/20" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-3"><SlidersHorizontal className="h-4 w-4 text-amber-400" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin text-amber-400" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="relative">{visibleMovies.length > 0 && <><button type="button" onClick={() => scrollCarousel(-340)} aria-label="Previous movies" className="absolute left-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-amber-400/30 bg-slate-900/90 text-amber-300 shadow-xl shadow-black/40 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-400 transition"><ChevronLeft className="h-5 w-5" /></button><button type="button" onClick={() => scrollCarousel(340)} aria-label="Next movies" className="absolute right-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-amber-400/30 bg-slate-900/90 text-amber-300 shadow-xl shadow-black/40 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-400 transition" ><ChevronRight className="h-5 w-5" /></button></>}<div ref={carouselRef} className="flex snap-x snap-mandatory gap-[1.2vw] overflow-x-auto px-1 pb-4 scrollbar-thin">{visibleMovies.map((movie) => {
     const movieNumber = movies.findIndex((item) => item.id === movie.id) + 1;
-    return <button key={movie.id} onClick={() => onSelect(movie)} className="group relative min-w-[78%] snap-start overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] text-left transition hover:-translate-y-1.5 hover:border-rose-400/70 hover:shadow-2xl hover:shadow-rose-950/40 sm:min-w-[44%] lg:min-w-[31%]"><span className="absolute left-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border border-rose-400/40 bg-gradient-to-br from-rose-600 to-red-700 text-sm font-bold text-white shadow-md shadow-rose-950/40" aria-label={`Movie ${movieNumber}`}>{movieNumber}</span><MoviePoster src={movie.poster} title={movie.title} /><div className="p-[clamp(0.8rem,1.3vw,1rem)]"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-white group-hover:text-rose-200 transition">{movie.title}</h3><span className="rounded-md border border-rose-500/30 bg-rose-500/20 px-2 py-0.5 text-xs font-semibold text-rose-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-300">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>;
+    return <button key={movie.id} onClick={() => onSelect(movie)} className="group relative min-w-[78%] snap-start overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 text-left transition hover:-translate-y-1.5 hover:border-amber-400/50 hover:shadow-xl hover:shadow-amber-950/30 sm:min-w-[44%] lg:min-w-[31%]"><span className="absolute left-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border border-amber-400/40 bg-gradient-to-br from-amber-500 to-amber-600 text-sm font-bold text-slate-950 shadow-sm" aria-label={`Movie ${movieNumber}`}>{movieNumber}</span><MoviePoster src={movie.poster} title={movie.title} /><div className="p-[clamp(0.8rem,1.3vw,1rem)]"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-white group-hover:text-amber-200 transition">{movie.title}</h3><span className="rounded-md border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-300">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>;
   })}</div></div></section>;
 }
 
 function MoviePoster({ src, title }: { src: string; title: string }) {
   const [failed, setFailed] = useState(!src);
   if (failed) {
-    return <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 via-rose-950/40 to-slate-900 px-4 text-center"><Film className="h-9 w-9 text-rose-400/80" /><span className="text-sm font-semibold text-slate-200">{title}</span><span className="text-[11px] uppercase tracking-[0.18em] text-rose-300/60">Poster unavailable</span></div>;
+    return <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 px-4 text-center"><Film className="h-9 w-9 text-amber-400/80" /><span className="text-sm font-semibold text-slate-200">{title}</span><span className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Poster unavailable</span></div>;
   }
   return <img src={src} alt={`${title} poster`} onError={() => setFailed(true)} className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-105" />;
 }
@@ -905,11 +905,11 @@ function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates:
               onClick={() => onSelect(date.value)}
               className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${
                 selected === date.value
-                  ? "border-rose-400 bg-gradient-to-b from-rose-500/30 via-rose-500/15 to-transparent text-white shadow-xl shadow-rose-500/20 ring-1 ring-rose-400/60"
-                  : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/50 hover:bg-rose-500/10"
+                  ? "border-amber-400 bg-gradient-to-b from-amber-500/20 via-amber-500/10 to-transparent text-white shadow-md shadow-amber-950/30 ring-1 ring-amber-400/50"
+                  : "border-white/10 bg-slate-950/40 text-slate-300 hover:border-amber-400/50 hover:bg-amber-500/10"
               }`}
             >
-              <p className="text-xs text-rose-300/80 font-medium">{date.weekday}</p>
+              <p className="text-xs text-amber-400 font-medium">{date.weekday}</p>
               <p className="mt-2 font-bold text-white">{date.label}</p>
             </button>
           ))}
@@ -945,10 +945,10 @@ function ShowtimePicker({
             <button
               key={time}
               onClick={() => onSelect(time)}
-              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold text-white transition hover:-translate-y-0.5 hover:border-rose-400/60 hover:bg-gradient-to-r hover:from-rose-500/20 hover:to-pink-500/10 hover:shadow-lg hover:shadow-rose-500/15"
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/40 p-5 text-left font-semibold text-white transition hover:-translate-y-0.5 hover:border-amber-400/50 hover:bg-amber-500/10"
             >
               <span>{time}</span>
-              <ChevronRight className="h-4 w-4 text-rose-300" />
+              <ChevronRight className="h-4 w-4 text-amber-400" />
             </button>
           ))}
         </div>
@@ -958,7 +958,7 @@ function ShowtimePicker({
           <button
             type="button"
             onClick={onChangeDate}
-            className="mt-4 rounded-xl bg-gradient-to-r from-rose-500 to-pink-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-rose-500/30 transition hover:brightness-110"
+            className="mt-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-md shadow-amber-950/30 transition hover:from-amber-400 hover:to-amber-500"
           >
             Choose another date
           </button>
@@ -985,24 +985,24 @@ function TicketPicker({ onSelect }: { onSelect: (breakdown: Record<string, numbe
       <SectionTitle eyebrow="Step 04" title="How many tickets?" icon={<Ticket />} />
       <div className="space-y-3">
         {TICKET_TYPES.map((type) => (
-          <div key={type.code} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-4 transition hover:border-white/20">
+          <div key={type.code} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/40 p-4 transition hover:border-white/20">
             <div>
               <p className="font-semibold text-white">{type.label}</p>
-              <p className="text-xs text-rose-300/80 font-medium">${type.price.toFixed(2)} each</p>
+              <p className="text-xs text-amber-400 font-medium">${type.price.toFixed(2)} each</p>
             </div>
             <div className="flex items-center gap-3">
-              <button type="button" onClick={() => adjust(type.code, -1)} disabled={!counts[type.code]} className="h-9 w-9 rounded-xl border border-white/15 bg-white/5 text-lg font-bold transition hover:border-rose-400 hover:bg-rose-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-30">−</button>
+              <button type="button" onClick={() => adjust(type.code, -1)} disabled={!counts[type.code]} className="h-9 w-9 rounded-xl border border-white/15 bg-white/5 text-lg font-bold transition hover:border-amber-400 hover:bg-amber-500/15 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-30">−</button>
               <span className="w-6 text-center text-lg font-bold text-white">{counts[type.code] ?? 0}</span>
-              <button type="button" onClick={() => adjust(type.code, 1)} disabled={total >= 10} className="h-9 w-9 rounded-xl border border-white/15 bg-white/5 text-lg font-bold transition hover:border-rose-400 hover:bg-rose-500/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-30">+</button>
+              <button type="button" onClick={() => adjust(type.code, 1)} disabled={total >= 10} className="h-9 w-9 rounded-xl border border-white/15 bg-white/5 text-lg font-bold transition hover:border-amber-400 hover:bg-amber-500/15 hover:text-amber-300 disabled:cursor-not-allowed disabled:opacity-30">+</button>
             </div>
           </div>
         ))}
       </div>
-      <div className="mt-5 flex items-center justify-between rounded-2xl border border-rose-500/20 bg-rose-500/[0.06] p-4 text-sm">
+      <div className="mt-5 flex items-center justify-between rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm">
         <span className="text-slate-300 font-medium">{total} ticket{total === 1 ? "" : "s"} selected</span>
         <span className="font-bold text-white text-base">${totalPrice.toFixed(2)}</span>
       </div>
-      <button onClick={() => onSelect(counts)} disabled={total < 1} className="mx-auto mt-6 block rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 px-7 py-3 font-bold text-white shadow-lg shadow-rose-950/50 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none">Continue</button>
+      <button onClick={() => onSelect(counts)} disabled={total < 1} className="mx-auto mt-6 block rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 px-7 py-3 font-bold text-slate-950 shadow-md shadow-amber-950/40 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none">Continue</button>
     </section>
   );
 }
@@ -1042,22 +1042,22 @@ function SeatPicker({
   return (
     <section>
       <SectionTitle eyebrow="Step 05" title="Choose your seats" icon={<Ticket />} />
-      <div className="mb-6 rounded-2xl border border-rose-400/30 bg-gradient-to-b from-rose-500/10 via-rose-500/5 to-transparent p-5 text-center">
-        <div className="mx-auto max-w-xl rounded-[50%] border-2 border-rose-400/90 bg-gradient-to-b from-rose-400/30 via-rose-500/15 to-transparent py-2.5 text-xs font-black uppercase tracking-[0.5em] text-rose-100 shadow-[0_10px_35px_rgba(244,63,94,0.3)]">Screen</div>
-        <p className="mt-3 text-xs text-rose-200/80 font-medium">Rows closest to the screen are first · Middle rows usually provide the best view</p>
+      <div className="mb-6 rounded-2xl border border-amber-400/25 bg-gradient-to-b from-amber-500/10 via-slate-900/40 to-transparent p-5 text-center">
+        <div className="mx-auto max-w-xl rounded-[50%] border-2 border-amber-400/80 bg-gradient-to-b from-amber-400/20 via-amber-500/10 to-transparent py-2.5 text-xs font-black uppercase tracking-[0.5em] text-amber-200 shadow-[0_8px_30px_rgba(245,158,11,0.18)]">Screen</div>
+        <p className="mt-3 text-xs text-slate-400 font-medium">Rows closest to the screen are first · Middle rows usually provide the best view</p>
       </div>
 
-      <div className="mb-5 rounded-2xl border border-rose-400/30 bg-gradient-to-br from-rose-500/15 via-pink-500/10 to-transparent p-5">
+      <div className="mb-5 rounded-2xl border border-amber-400/25 bg-gradient-to-br from-amber-500/10 via-slate-900/40 to-transparent p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-white">Recommended Seats</p>
             <p className="mt-1 text-xs text-slate-300">Find the highest-scoring available seats for {booking.ticketCount} ticket{booking.ticketCount === 1 ? "" : "s"}.</p>
           </div>
-          <button type="button" onClick={onFindBest} disabled={loading} className="rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-rose-950/40 transition active:scale-[0.99] disabled:opacity-50">Find Best Seats</button>
+          <button type="button" onClick={onFindBest} disabled={loading} className="rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 px-4 py-2 text-sm font-bold text-slate-950 shadow-md shadow-amber-950/30 transition active:scale-[0.99] disabled:opacity-50">Find Best Seats</button>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <label className="text-xs text-slate-400" htmlFor="seat-preference">Preference</label>
-          <select id="seat-preference" value={preference} onChange={(event) => onPreferenceChange(event.target.value as SeatPreference)} className="rounded-lg border border-white/10 bg-slate-900/90 px-3 py-2 text-xs text-white outline-none focus:border-rose-400">
+          <select id="seat-preference" value={preference} onChange={(event) => onPreferenceChange(event.target.value as SeatPreference)} className="rounded-lg border border-white/10 bg-slate-900/90 px-3 py-2 text-xs text-white outline-none focus:border-amber-400">
             <option value="middle">Middle rows</option>
             <option value="center">Horizontal center</option>
             <option value="front">Front rows</option>
@@ -1068,15 +1068,15 @@ function SeatPicker({
           <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/40 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-rose-400">Recommended for you</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-amber-400">Recommended for you</p>
                 <p className="mt-1 font-semibold text-white">Row {recommendation.seats[0].row} · Seats {recommendation.seats.map((seat) => seat.col).join(", ")}</p>
                 <p className="mt-2 text-xs leading-5 text-slate-300">{recommendation.explanation}</p>
               </div>
-              <span className="rounded-full border border-rose-500/30 bg-rose-500/20 px-3 py-1 text-xs font-semibold text-rose-200">Score {recommendation.score}/100</span>
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300">Score {recommendation.score}/100</span>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" onClick={() => onSelectRecommendation(recommendation)} className="rounded-lg bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-rose-950/40 active:scale-[0.99]">Select These Seats</button>
-              {recommendations.length > 1 && <button type="button" onClick={onAlternative} className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-300 hover:border-rose-400/50 hover:text-white">View Alternative</button>}
+              <button type="button" onClick={() => onSelectRecommendation(recommendation)} className="rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 px-3.5 py-2 text-xs font-bold text-slate-950 shadow-sm shadow-amber-950/30 active:scale-[0.99]">Select These Seats</button>
+              {recommendations.length > 1 && <button type="button" onClick={onAlternative} className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs text-slate-300 hover:border-amber-400/50 hover:text-white">View Alternative</button>}
             </div>
           </div>
         )}
@@ -1091,17 +1091,17 @@ function SeatPicker({
             const status = seatStatuses[key] ?? "available";
             const selected = booking.seats.some((seat) => seat.row === row && seat.col === col);
             const unavailable = status === "booked" || status === "held";
-            return <button type="button" key={col} disabled={unavailable || loading} aria-label={`Row ${row}, seat ${col}, ${selected ? "selected" : status}`} onClick={() => onToggle(row, col)} className={`h-8 w-8 rounded-lg text-xs font-semibold transition hover:scale-110 disabled:cursor-not-allowed ${selected ? "bg-gradient-to-tr from-rose-600 to-red-600 text-white shadow-md shadow-rose-900/50 ring-2 ring-rose-400/60" : status === "booked" ? "bg-slate-900/60 border border-slate-800/60 text-slate-600 opacity-50" : status === "held" ? "bg-amber-500/30 border border-amber-500/40 text-amber-200" : "bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:border-rose-400 hover:bg-rose-500/30 hover:text-white"}`}>{selected ? <Check className="mx-auto h-3.5 w-3.5" /> : col}</button>;
+            return <button type="button" key={col} disabled={unavailable || loading} aria-label={`Row ${row}, seat ${col}, ${selected ? "selected" : status}`} onClick={() => onToggle(row, col)} className={`h-8 w-8 rounded-lg text-xs font-semibold transition hover:scale-110 disabled:cursor-not-allowed ${selected ? "bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 font-bold shadow-md shadow-amber-500/30 ring-2 ring-amber-400/60" : status === "booked" ? "bg-slate-900/60 border border-slate-800/60 text-slate-600 opacity-50" : status === "held" ? "bg-amber-500/30 border border-amber-500/40 text-amber-200" : "bg-slate-800/90 border border-slate-700/80 text-slate-300 hover:border-amber-400 hover:bg-amber-500/20 hover:text-amber-300"}`}>{selected ? <Check className="mx-auto h-3.5 w-3.5 stroke-[3]" /> : col}</button>;
           })}
         </div>)}
       </div>
       <div className="mt-5 flex flex-wrap justify-center gap-4 text-xs text-slate-400">
         <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-800 border border-slate-700" /> Available</span>
-        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-gradient-to-tr from-rose-600 to-red-600 shadow-sm shadow-rose-950/40" /> Selected</span>
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-gradient-to-tr from-amber-500 to-amber-600 shadow-sm shadow-amber-950/40" /> Selected</span>
         <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-slate-900/60 border border-slate-800 opacity-50" /> Booked</span>
         <span className="flex items-center gap-2"><span className="h-3 w-3 rounded bg-amber-500/30 border border-amber-500/40" /> Held</span>
       </div>
-      <button onClick={onConfirm} disabled={loading || booking.seats.length !== booking.ticketCount} className="mx-auto mt-7 block rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 px-7 py-3 font-bold text-white shadow-xl shadow-rose-950/50 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none">{booking.seats.length === booking.ticketCount ? "Review booking" : `Choose ${booking.ticketCount - booking.seats.length} more`}</button>
+      <button onClick={onConfirm} disabled={loading || booking.seats.length !== booking.ticketCount} className="mx-auto mt-7 block rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 px-7 py-3 font-bold text-slate-950 shadow-md shadow-amber-950/40 transition active:scale-[0.99] disabled:cursor-not-allowed disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none">{booking.seats.length === booking.ticketCount ? "Review booking" : `Choose ${booking.ticketCount - booking.seats.length} more`}</button>
     </section>
   );
 }
@@ -1111,15 +1111,15 @@ function Review({ booking, onConfirm, saving }: { booking: BookingState; onConfi
     .filter((type) => (booking.ticketBreakdown[type.code] ?? 0) > 0)
     .map((type) => `${booking.ticketBreakdown[type.code]} ${type.label}`)
     .join(", ") || String(booking.ticketCount);
-  return <section className="mx-auto max-w-xl"><SectionTitle eyebrow="Step 06" title="Review your booking" icon={<Ticket />} /><div className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.045] p-6 text-sm backdrop-blur-md"><SummaryRow label="Movie" value={booking.movie?.title ?? ""} /><SummaryRow label="Date" value={booking.date ?? ""} /><SummaryRow label="Showtime" value={booking.showtime ?? ""} /><SummaryRow label="Tickets" value={breakdownLabel} /><SummaryRow label="Seats" value={booking.seats.map((seat) => `${seat.row}${seat.col}`).join(", ")} /><div className="my-4 border-t border-white/10" /><SummaryRow label="Total" value={`$${computeTicketPrice(booking.ticketBreakdown).toFixed(2)}`} strong /></div><button onClick={onConfirm} disabled={saving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 py-3.5 font-bold text-white shadow-xl shadow-rose-950/50 transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60">{saving && <Loader2 className="h-4 w-4 animate-spin" />} {saving ? "Saving booking…" : "Confirm booking"}</button></section>;
+  return <section className="mx-auto max-w-xl"><SectionTitle eyebrow="Step 06" title="Review your booking" icon={<Ticket />} /><div className="space-y-3 rounded-3xl border border-white/10 bg-slate-950/40 p-6 text-sm backdrop-blur-md"><SummaryRow label="Movie" value={booking.movie?.title ?? ""} /><SummaryRow label="Date" value={booking.date ?? ""} /><SummaryRow label="Showtime" value={booking.showtime ?? ""} /><SummaryRow label="Tickets" value={breakdownLabel} /><SummaryRow label="Seats" value={booking.seats.map((seat) => `${seat.row}${seat.col}`).join(", ")} /><div className="my-4 border-t border-white/10" /><SummaryRow label="Total" value={`$${computeTicketPrice(booking.ticketBreakdown).toFixed(2)}`} strong /></div><button onClick={onConfirm} disabled={saving} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 py-3.5 font-bold text-slate-950 shadow-md shadow-amber-950/40 transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60">{saving && <Loader2 className="h-4 w-4 animate-spin text-slate-950" />} {saving ? "Saving booking…" : "Confirm booking"}</button></section>;
 }
 
 function Confirmation({ reference, onRestart }: { reference: string; onRestart: () => void }) {
-  return <section className="mx-auto max-w-xl text-center"><div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-slate-950 shadow-xl shadow-emerald-500/30"><Check className="h-10 w-10" /></div><p className="mt-6 text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Booking confirmed</p><h2 className="mt-2 text-3xl font-extrabold text-white">Enjoy the show!</h2><p className="mt-3 text-slate-400">Your confirmation number is</p><p className="mt-2 font-mono text-2xl font-black bg-gradient-to-r from-rose-300 via-pink-300 to-amber-300 bg-clip-text text-transparent">{reference}</p><button onClick={onRestart} className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-3 font-semibold text-white transition hover:border-rose-400/50 hover:bg-rose-500/10">Book another movie</button></section>;
+  return <section className="mx-auto max-w-xl text-center"><div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-slate-950 shadow-xl shadow-emerald-500/30"><Check className="h-10 w-10" /></div><p className="mt-6 text-xs font-bold uppercase tracking-[0.24em] text-emerald-400">Booking confirmed</p><h2 className="mt-2 text-3xl font-extrabold text-white">Enjoy the show!</h2><p className="mt-3 text-slate-400">Your confirmation number is</p><p className="mt-2 font-mono text-2xl font-black bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent">{reference}</p><button onClick={onRestart} className="mt-8 rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-3 font-semibold text-white transition hover:border-amber-400/50 hover:bg-amber-500/10">Book another movie</button></section>;
 }
 
 function SectionTitle({ eyebrow, title, icon }: { eyebrow: string; title: string; icon: ReactNode }) {
-  return <div className="mb-6"><p className="text-xs font-bold uppercase tracking-[0.22em] text-rose-400">{eyebrow}</p><h2 className="mt-2 flex items-center gap-2 text-2xl font-bold tracking-tight text-white">{<span className="text-rose-400">{icon}</span>}{title}</h2></div>;
+  return <div className="mb-6"><p className="text-xs font-bold uppercase tracking-[0.22em] text-amber-400">{eyebrow}</p><h2 className="mt-2 flex items-center gap-2 text-2xl font-bold tracking-tight text-white">{<span className="text-amber-400">{icon}</span>}{title}</h2></div>;
 }
 
 function SummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
