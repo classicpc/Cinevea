@@ -45,6 +45,26 @@ type SeatRecommendation = {
   score: number;
   explanation: string;
 };
+type LocationOption = { id: string; name: string; city: string; country: string };
+
+function findLocation(text: string, locations: LocationOption[]): LocationOption | null {
+  const normalized = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return null;
+
+  return locations.find((location) => {
+    const terms = [location.city, location.name]
+      .filter(Boolean)
+      .map((term) => term.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim())
+      .filter((term) => term.length >= 3);
+    return terms.some((term) => normalized === term || normalized.includes(` ${term} `) || normalized.startsWith(`${term} `) || normalized.endsWith(` ${term}`));
+  }) ?? null;
+}
 /** Intl may emit narrow no-break spaces ("7:00\u202fPM"); normalise so showtimes compare and match typed text. */
 const formatShowtime = (date: Date) =>
   date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ");
@@ -161,7 +181,7 @@ function BookingApp() {
   const [speaking, setSpeaking] = useState(false);
   const [bookingRef, setBookingRef] = useState("");
   const [saving, setSaving] = useState(false);
-  const [locations, setLocations] = useState<Array<{ id: string; name: string; city: string; country: string }>>([]);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
   const [locationId, setLocationId] = useState("");
   const [catalogMovies, setCatalogMovies] = useState<Movie[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
@@ -267,7 +287,10 @@ function BookingApp() {
           const startDate = new Date(showtime.starts_at);
           const dateKey = toLocalDateKey(startDate);
           const time = formatShowtime(startDate);
-          (showtimesByDate[dateKey] ??= []).push({ time, id: showtime.id });
+          const entries = showtimesByDate[dateKey] ??= [];
+          if (!entries.some((entry) => entry.time === time)) {
+            entries.push({ time, id: showtime.id });
+          }
         }
         return {
           id: movie.id,
@@ -287,6 +310,26 @@ function BookingApp() {
     setCatalogLoading(false);
   }, []);
 
+  const changeLocation = useCallback(() => {
+    window.sessionStorage.removeItem("cinevea-location");
+    setLocationId("");
+    setCatalogMovies([]);
+    setCatalogError(null);
+    setCatalogLoading(false);
+    setSeatStatuses({});
+    setRecommendations([]);
+    setRecommendationIndex(0);
+    setBooking(initialBooking);
+  }, []);
+
+  useEffect(() => {
+    if (!locations.length || locationId) return;
+    const savedLocationId = window.sessionStorage.getItem("cinevea-location");
+    if (savedLocationId && locations.some((location) => location.id === savedLocationId)) {
+      void chooseLocation(savedLocationId);
+    }
+  }, [chooseLocation, locationId, locations]);
+
   const announce = useCallback((text: string) => {
     addMessage("assistant", text);
     speak(text);
@@ -301,8 +344,15 @@ function BookingApp() {
   const chooseDate = useCallback((date: string, quiet = false) => {
     setBooking((state) => ({ ...state, date, showtime: null, ticketCount: 0, ticketBreakdown: {}, seats: [], step: "showtime" }));
     const formatted = dates.find((item) => item.value === date)?.label ?? date;
-    if (!quiet) announce(`Showtimes for ${formatted} are now available. Choose a time.`);
-  }, [announce, dates]);
+    const hasShowtimes = (booking.movie?.showtimesByDate?.[date] ?? []).length > 0;
+    if (!quiet) {
+      announce(
+        hasShowtimes
+          ? `Showtimes for ${formatted} are now available. Choose a time.`
+          : `There are no available showtimes for ${formatted}. Choose another date or say “change date” to continue.`
+      );
+    }
+  }, [announce, booking.movie, dates]);
 
   const chooseShowtime = useCallback(async (showtime: string, quiet = false) => {
     const showtimeId = booking.date
@@ -475,6 +525,13 @@ function BookingApp() {
         const available = booking.date ? booking.movie?.showtimesByDate?.[booking.date] ?? [] : [];
         if (booking.step === "showtime" && available.some((entry) => entry.time === action.showtime)) {
           void chooseShowtime(action.showtime, true);
+        } else if (booking.step === "showtime") {
+          const availableTimes = available.map((entry) => entry.time);
+          announce(
+            availableTimes.length
+              ? `That showtime is not available for the selected date. Available times are: ${availableTimes.join(", ")}.`
+              : "There are no available showtimes for the selected date."
+          );
         }
         break;
       }
@@ -516,12 +573,30 @@ function BookingApp() {
     }
   }, [announce, booking, catalogMovies, chooseDate, chooseMovie, chooseShowtime, chooseTickets, confirm, dates, goBack, restart, review, seatPreference, seatStatuses]);
 
-  const sendText = useCallback((text: string) => {
+  const sendText = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || thinking) return;
     addMessage("user", trimmed);
     speechController.stopSpeaking();
     setSpeaking(false);
+
+    const mentionedLocation = findLocation(trimmed, locations);
+    if (mentionedLocation) {
+      await chooseLocation(mentionedLocation.id);
+      setBooking(initialBooking);
+      announce(`Location set to ${mentionedLocation.name}, ${mentionedLocation.city}. Now choose a movie or ask me what is playing.`);
+      return;
+    }
+
+    if (!locationId) {
+      announce("Please choose a location first so I can show you the movies available at that theatre.");
+      return;
+    }
+    if (catalogLoading) {
+      announce("I'm loading the live movie listings for this location. Please try again in a moment.");
+      return;
+    }
+
     setThinking(true);
 
     // Show the assistant only the showtimes for the chosen date, not every date.
@@ -549,7 +624,7 @@ function BookingApp() {
       })
       .catch(() => announce("Sorry, something went wrong. Please try again."))
       .finally(() => setThinking(false));
-  }, [announce, addMessage, booking, catalogMovies, messages, runAssistantAction, thinking]);
+  }, [announce, addMessage, booking, catalogLoading, catalogMovies, chooseLocation, locationId, locations, messages, runAssistantAction, thinking]);
 
   return (
     <div className="min-h-screen bg-[#171923] text-slate-100">
@@ -562,7 +637,7 @@ function BookingApp() {
             <h1 className="mt-2 text-[clamp(1.7rem,3vw,2.5rem)] font-semibold tracking-tight text-white">Your next great night out.</h1>
             <p className="mt-2 max-w-xl text-sm text-slate-400">Reserve seats in seconds, with a personal assistant to guide every step.</p>
           </div>
-          <button onClick={restart} className="hidden items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:border-rose-400/40 hover:text-white sm:flex">
+          <button onClick={restart} className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:border-rose-400/40 hover:text-white">
             Start over
           </button>
           </div>
@@ -606,9 +681,16 @@ function BookingApp() {
           <main className="min-h-[65dvh] overflow-y-auto rounded-[clamp(1rem,2vw,1.75rem)] border border-slate-300/15 bg-[#242733]/80 p-[clamp(1rem,2vw,2rem)] shadow-2xl shadow-slate-950/40">
             {["date", "showtime", "tickets", "seats", "review"].includes(booking.step) && <button onClick={goBack} className="mb-6 inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-rose-400/40 hover:text-white"><ArrowLeft className="h-4 w-4" /> Back</button>}
             {booking.step === "greeting" && !locationId && <LocationPicker locations={locations} loading={catalogLoading} error={catalogError} onSelect={chooseLocation} />}
-            {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={() => { setLocationId(""); setCatalogMovies([]); }} />}
+            {booking.step === "greeting" && locationId && <MoviePicker movies={catalogMovies} loading={catalogLoading} error={catalogError} onSelect={chooseMovie} onChangeLocation={changeLocation} />}
             {booking.step === "date" && booking.movie && <DatePicker movie={booking.movie} dates={dates} selected={booking.date} onSelect={chooseDate} />}
-            {booking.step === "showtime" && booking.movie && booking.date && <ShowtimePicker movie={booking.movie} date={booking.date} onSelect={chooseShowtime} />}
+            {booking.step === "showtime" && booking.movie && booking.date && (
+              <ShowtimePicker
+                movie={booking.movie}
+                date={booking.date}
+                onSelect={chooseShowtime}
+                onChangeDate={goBack}
+              />
+            )}
             {booking.step === "tickets" && <TicketPicker onSelect={chooseTickets} />}
             {booking.step === "seats" && <SeatPicker booking={booking} seatStatuses={seatStatuses} loading={seatLoading} preference={seatPreference} recommendations={recommendations} recommendationIndex={recommendationIndex} onPreferenceChange={setSeatPreference} onFindBest={findBestSeats} onSelectRecommendation={selectRecommendation} onAlternative={showAlternative} onToggle={toggleSeat} onConfirm={() => void review()} />}
             {booking.step === "review" && <Review booking={booking} onConfirm={confirm} saving={saving} />}
@@ -641,7 +723,10 @@ function MoviePicker({ movies, loading, error, onSelect, onChangeLocation }: { m
     .filter((movie) => genre === "All" || movie.genre === genre)
     .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : b.showtimes.length - a.showtimes.length);
   const scrollCarousel = (amount: number) => carouselRef.current?.scrollBy({ left: amount, behavior: "smooth" });
-  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm text-rose-300 hover:text-white">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-rose-400/60" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3"><SlidersHorizontal className="h-4 w-4 text-rose-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="relative">{visibleMovies.length > 0 && <><button type="button" onClick={() => scrollCarousel(-340)} aria-label="Previous movies" className="absolute left-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800"><ChevronLeft className="h-5 w-5" /></button><button type="button" onClick={() => scrollCarousel(340)} aria-label="Next movies" className="absolute right-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800" ><ChevronRight className="h-5 w-5" /></button></>}<div ref={carouselRef} className="flex snap-x snap-mandatory gap-[1.2vw] overflow-x-auto px-1 pb-4 scrollbar-thin">{visibleMovies.map((movie) => <button key={movie.id} onClick={() => onSelect(movie)} className="group min-w-[78%] snap-start overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] text-left transition hover:-translate-y-1 hover:border-rose-400/50 hover:bg-white/[0.08] sm:min-w-[44%] lg:min-w-[31%]"><MoviePoster src={movie.poster} title={movie.title} /><div className="p-[clamp(0.8rem,1.3vw,1rem)]"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{movie.title}</h3><span className="text-xs text-rose-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-400">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>)}</div></div></section>;
+  return <section><div className="mb-6 flex items-end justify-between gap-4"><SectionTitle eyebrow="Now showing" title="Choose a movie" icon={<Film />} /><button onClick={onChangeLocation} className="mb-1 text-sm text-rose-300 hover:text-white">Change location</button></div>{!loading && !error && movies.length > 0 && <div className="mb-6 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"><label className="relative"><Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search movies…" aria-label="Search movies" className="w-full rounded-xl border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-rose-400/60" /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-3"><SlidersHorizontal className="h-4 w-4 text-rose-300" /><select value={genre} onChange={(event) => setGenre(event.target.value)} aria-label="Filter by genre" className="bg-transparent py-3 text-sm text-white outline-none"><option className="bg-slate-900">All</option>{genres.slice(1).map((item) => <option key={item} className="bg-slate-900">{item}</option>)}</select></label><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort movies" className="rounded-xl border border-white/10 bg-white/[0.05] px-3 py-3 text-sm text-white outline-none"><option value="relevance" className="bg-slate-900">Most showtimes</option><option value="title" className="bg-slate-900">Title A–Z</option></select></div>}{loading && <div className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading live listings…</div>}{error && <div className="rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">{error}</div>}{!loading && !error && !movies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No currently bookable movies or future showtimes are available at this location.</div>}{!loading && !error && movies.length > 0 && !visibleMovies.length && <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-slate-400">No movies match your search or filters.</div>}<div className="relative">{visibleMovies.length > 0 && <><button type="button" onClick={() => scrollCarousel(-340)} aria-label="Previous movies" className="absolute left-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800"><ChevronLeft className="h-5 w-5" /></button><button type="button" onClick={() => scrollCarousel(340)} aria-label="Next movies" className="absolute right-2 top-1/2 z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-slate-900/90 text-rose-300 shadow-lg hover:bg-slate-800" ><ChevronRight className="h-5 w-5" /></button></>}<div ref={carouselRef} className="flex snap-x snap-mandatory gap-[1.2vw] overflow-x-auto px-1 pb-4 scrollbar-thin">{visibleMovies.map((movie) => {
+    const movieNumber = movies.findIndex((item) => item.id === movie.id) + 1;
+    return <button key={movie.id} onClick={() => onSelect(movie)} className="group relative min-w-[78%] snap-start overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] text-left transition hover:-translate-y-1 hover:border-rose-400/50 hover:bg-white/[0.08] sm:min-w-[44%] lg:min-w-[31%]"><span className="absolute left-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border border-white/20 bg-slate-950/90 text-sm font-bold text-white shadow-lg" aria-label={`Movie ${movieNumber}`}>{movieNumber}</span><MoviePoster src={movie.poster} title={movie.title} /><div className="p-[clamp(0.8rem,1.3vw,1rem)]"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{movie.title}</h3><span className="text-xs text-rose-300">{movie.rating}</span></div><p className="mt-1 text-xs text-slate-400">{movie.genre} · {movie.duration ? `${movie.duration} min` : "Runtime unavailable"} · {movie.showtimes.length} showtimes</p><p className="mt-3 line-clamp-2 text-sm text-slate-300">{movie.description}</p></div></button>;
+  })}</div></div></section>;
 }
 
 function MoviePoster({ src, title }: { src: string; title: string }) {
@@ -653,12 +738,80 @@ function MoviePoster({ src, title }: { src: string; title: string }) {
 }
 
 function DatePicker({ movie, dates, selected, onSelect }: { movie: Movie; dates: ReturnType<typeof getDates>; selected: string | null; onSelect: (date: string) => void }) {
-  return <section><SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} /><div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{dates.map((date, index) => <button type="button" key={date.value} onClick={() => onSelect(date.value)} className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${selected === date.value ? "border-rose-400 bg-rose-500/20 text-white shadow-lg shadow-rose-500/10" : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/40"}`}><p className="text-xs text-slate-500">{index === 0 ? "Today" : index === 1 ? "Tomorrow" : date.weekday}</p><p className="mt-2 font-bold">{date.label}</p></button>)}</div></section>;
+  const availableDates = dates.filter((date) => (movie.showtimesByDate?.[date.value] ?? []).length > 0);
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 02" title={`When would you like to see ${movie.title}?`} icon={<CalendarDays />} />
+      {availableDates.length ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+          {availableDates.map((date) => (
+            <button
+              type="button"
+              key={date.value}
+              onClick={() => onSelect(date.value)}
+              className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 ${
+                selected === date.value
+                  ? "border-rose-400 bg-rose-500/20 text-white shadow-lg shadow-rose-500/10"
+                  : "border-white/10 bg-white/[0.045] text-slate-300 hover:border-rose-400/40"
+              }`}
+            >
+              <p className="text-xs text-slate-500">{date.weekday}</p>
+              <p className="mt-2 font-bold">{date.label}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5">
+          <p className="text-sm text-amber-100">This movie has no available showtimes in the next 7 days.</p>
+          <p className="mt-2 text-xs text-slate-400">Use “Start over” or type “restart” to choose another movie.</p>
+        </div>
+      )}
+    </section>
+  );
 }
 
-function ShowtimePicker({ movie, date, onSelect }: { movie: Movie; date: string; onSelect: (time: string) => void }) {
+function ShowtimePicker({
+  movie,
+  date,
+  onSelect,
+  onChangeDate,
+}: {
+  movie: Movie;
+  date: string;
+  onSelect: (time: string) => void;
+  onChangeDate: () => void;
+}) {
   const times = movie.showtimesByDate?.[date] ?? [];
-  return <section><SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} /><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{times.length ? times.map(({ time }) => <button key={time} onClick={() => onSelect(time)} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"><span>{time}</span><ChevronRight className="h-4 w-4 text-rose-300" /></button>) : <p className="text-sm text-slate-400">No showtimes available on this date.</p>}</div></section>;
+  return (
+    <section>
+      <SectionTitle eyebrow="Step 03" title="Pick a showtime" icon={<Clock3 />} />
+      {times.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {times.map(({ time }) => (
+            <button
+              key={time}
+              onClick={() => onSelect(time)}
+              className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.045] p-5 text-left font-semibold transition hover:border-rose-400/50 hover:bg-rose-500/10"
+            >
+              <span>{time}</span>
+              <ChevronRight className="h-4 w-4 text-rose-300" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-5">
+          <p className="text-sm text-amber-100">No showtimes are available on this date.</p>
+          <button
+            type="button"
+            onClick={onChangeDate}
+            className="mt-4 rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-400"
+          >
+            Choose another date
+          </button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function TicketPicker({ onSelect }: { onSelect: (breakdown: Record<string, number>) => void }) {

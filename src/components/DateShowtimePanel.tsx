@@ -97,7 +97,7 @@ export function DateShowtimePanel({
             </h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {movie.showtimes.map((st) => {
+            {(movie.showtimesByDate?.[visibleDate] ?? []).map(({ time: st }) => {
               const isSelected = st === selectedShowtime;
               return (
                 <button
