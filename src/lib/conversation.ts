@@ -1,17 +1,19 @@
 // Conversation engine for Cinevea.
-// `aiRespond` asks the `chat` Supabase Edge Function (OpenAI) for a reply and
-// falls back to the local rule-based engine (`ruleBasedRespond`) whenever the
-// function is unreachable, misconfigured, or out of credits.
+// Catalog conversation can use the chat Edge Function. Ticket, seat and
+// confirmation stages use local, state-aware rules so free-form replies
+// cannot silently overwrite quantities. Other stages retain the AI fallback.
 
 import {
   type Movie,
   type BookingState,
   type BookingStep,
   getDates,
+  computeTicketPrice,
   SEAT_ROWS,
   SEAT_COLS,
 } from "@/types";
 import { supabase } from "@/lib/supabase";
+import { parsePaymentChoice, type DemoPaymentMethod } from "@/lib/payment";
 
 export interface ChatMessage {
   id: string;
@@ -30,10 +32,15 @@ export type AssistantAction =
   | { type: "select_date"; date: string }
   | { type: "select_showtime"; showtime: string }
   | { type: "set_tickets"; count: number; breakdown?: Record<string, number> }
-  | { type: "select_seats"; seats: string[]; preference?: "middle" | "front" | "back" | "center" }
+  | {
+      type: "select_seats";
+      seats: string[];
+      preference?: "middle" | "front" | "back" | "center";
+    }
   | { type: "view_alternative" }
   | { type: "review_booking" }
   | { type: "confirm_booking" }
+  | { type: "select_payment"; paymentMethod: DemoPaymentMethod }
   | { type: "go_back" }
   | { type: "restart" }
   | { type: "advance"; to: BookingStep };
@@ -46,7 +53,8 @@ export type AssistantAction =
 function contains(text: string, ...words: string[]): boolean {
   const lower = text.toLowerCase();
   return words.some((w) => {
-    if (w.length <= 3 && !w.includes(" ")) return new RegExp(`\\b${w}\\b`).test(lower);
+    if (w.length <= 3 && !w.includes(" "))
+      return new RegExp(`\\b${w}\\b`).test(lower);
     return lower.includes(w);
   });
 }
@@ -89,27 +97,46 @@ const TYPE_SYNONYMS: Record<string, string[]> = {
   student: ["students", "student", "youths", "youth"],
 };
 
+export function isExplicitTicketChange(text: string): boolean {
+  if (/^(?:why|what|how|did|do|does|is|are)\b/i.test(text.trim())) return false;
+  return (
+    /\b(?:change|update|make|set|instead|actually)\b/i.test(text) &&
+    /\b(?:tickets?|adults?|students?|children|child|kids?|seniors?|people)\b/i.test(
+      text,
+    ) &&
+    !/\b(?:don't|do not|dont)\b/i.test(text)
+  );
+}
+
 export function parseTicketBreakdown(
-  text: string
+  text: string,
 ): { breakdown: Record<string, number>; total: number } | null {
   let lower = text.toLowerCase().trim();
-  // Strip conversational speech filler words (never strip 'for' or 'to' which are number homophones)
+  // Remove a leading conversational filler. Ticket counts still require clear numbers.
   lower = lower.replace(
     /^(?:yeah|yes|yep|sure|please|ok|okay|um|uh|i want|give me|can i get|can i have|we need|i need|book|get me|make it|set it to|actually)\s+/i,
-    ""
+    "",
   );
 
-  const breakdown: Record<string, number> = { adult: 0, senior: 0, child: 0, student: 0 };
+  const breakdown: Record<string, number> = {
+    adult: 0,
+    senior: 0,
+    child: 0,
+    student: 0,
+  };
   let foundSpecific = false;
   const numPattern =
-    "(?:\\d+|a|an|one|won|two|to|too|three|tree|free|four|for|fore|five|six|seven|eight|ate|nine|ten|tin)";
+    "(?:\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)";
 
   let remaining = lower;
 
   for (const [code, synonyms] of Object.entries(TYPE_SYNONYMS)) {
     for (const syn of synonyms) {
-      // 1. "2 adults" or "four adults" or "for adults"
-      const re1 = new RegExp(`\\b(${numPattern})\\s*(?:x|-|:)?\\s*${syn}\\b`, "i");
+      // 1. An explicit count such as "2 adults" or "four adults".
+      const re1 = new RegExp(
+        `\\b(${numPattern})\\s*(?:x|-|:)?\\s*${syn}\\b`,
+        "i",
+      );
       const m1 = remaining.match(re1);
       if (m1) {
         const val = wordOrDigitToNum(m1[1]);
@@ -120,7 +147,10 @@ export function parseTicketBreakdown(
         }
       }
       // 2. "adults 2" or "adult: 2"
-      const re2 = new RegExp(`\\b${syn}\\s*(?:x|-|:)?\\s*(${numPattern})\\b`, "i");
+      const re2 = new RegExp(
+        `\\b${syn}\\s*(?:x|-|:)?\\s*(${numPattern})\\b`,
+        "i",
+      );
       const m2 = remaining.match(re2);
       if (m2) {
         const val = wordOrDigitToNum(m2[1]);
@@ -133,17 +163,12 @@ export function parseTicketBreakdown(
     }
   }
 
-  // 3. For any remaining standalone category word without an explicit number (e.g. "and child", "child", "kid")
-  for (const [code, synonyms] of Object.entries(TYPE_SYNONYMS)) {
-    for (const syn of synonyms) {
-      const reStandalone = new RegExp(`\\b${syn}\\b`, "i");
-      if (reStandalone.test(remaining)) {
-        breakdown[code] += 1;
-        foundSpecific = true;
-        remaining = remaining.replace(reStandalone, " ");
-      }
-    }
-  }
+  // Ask for a count rather than inventing one for an unnumbered category.
+  const categoryWords = Object.values(TYPE_SYNONYMS)
+    .flat()
+    .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (new RegExp(`\\b(?:${categoryWords.join("|")})\\b`, "i").test(remaining))
+    return null;
 
   const result: Record<string, number> = {};
   for (const [k, v] of Object.entries(breakdown)) {
@@ -156,19 +181,20 @@ export function parseTicketBreakdown(
   }
 
   const generalMatch = lower.match(
-    new RegExp(`\\b(${numPattern})\\s*(?:tickets?|seats?|people|persons?)?\\b`)
+    /^(?:(?:okay|ok|please|actually|i want|i need|we need|give me|book|make it|set it to)\s+)*(\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+(?:tickets?|people|persons?))?[.!?]?$/i,
   );
   if (generalMatch) {
     const val = wordOrDigitToNum(generalMatch[1]);
-    if (val !== null && val >= 1) {
+    if (val !== null && val >= 1)
       return { breakdown: { adult: val }, total: val };
-    }
   }
 
   return null;
 }
 
-export function formatBreakdownSummary(breakdown: Record<string, number>): string {
+export function formatBreakdownSummary(
+  breakdown: Record<string, number>,
+): string {
   const labels: Record<string, string> = {
     adult: "Adult",
     senior: "Senior",
@@ -177,7 +203,10 @@ export function formatBreakdownSummary(breakdown: Record<string, number>): strin
   };
   return Object.entries(breakdown)
     .filter(([, count]) => count > 0)
-    .map(([code, count]) => `${count} ${labels[code] ?? code}${count > 1 ? (code === "child" ? "ren" : "s") : ""}`)
+    .map(
+      ([code, count]) =>
+        `${count} ${labels[code] ?? code}${count > 1 ? (code === "child" ? "ren" : "s") : ""}`,
+    )
     .join(", ");
 }
 
@@ -197,7 +226,7 @@ function canonicalizeMovieTitle(s: string): string {
     .toLowerCase()
     .replace(
       /^(?:i want to watch|i want to see|can we see|can we watch|showtimes for|let'?s see|let'?s watch|book|tickets for|how about|we want|i'?d like to see|movie|film)\s+/i,
-      ""
+      "",
     )
     .replace(/&/g, " and ")
     .replace(/\bpart\s+(?:two|ii)\b/g, "part 2")
@@ -229,16 +258,24 @@ function findMovie(text: string, movies: Movie[]): Movie | null {
   // 1. Direct and bidirectional title match
   for (const m of movies) {
     const normM = canonicalizeMovieTitle(m.title);
-    if (normInput === normM || normInput.includes(normM) || normM.includes(normInput)) {
+    if (
+      normInput === normM ||
+      normInput.includes(normM) ||
+      normM.includes(normInput)
+    ) {
       return m;
     }
   }
 
   // 2. Significant words in common
   const stopWords = new Set(["the", "and", "part", "for", "movie", "film"]);
-  const inputWords = normInput.split(" ").filter((w) => w.length >= 3 && !stopWords.has(w));
+  const inputWords = normInput
+    .split(" ")
+    .filter((w) => w.length >= 3 && !stopWords.has(w));
   for (const m of movies) {
-    const mWords = canonicalizeMovieTitle(m.title).split(" ").filter((w) => w.length >= 3 && !stopWords.has(w));
+    const mWords = canonicalizeMovieTitle(m.title)
+      .split(" ")
+      .filter((w) => w.length >= 3 && !stopWords.has(w));
     if (inputWords.length > 0 && inputWords.every((w) => mWords.includes(w))) {
       return m;
     }
@@ -247,7 +284,9 @@ function findMovie(text: string, movies: Movie[]): Movie | null {
   // 3. Prominent single-word match (e.g. "gladiator", "deadpool", "wolverine", "batman", "oppenheimer", "wicked", "dune")
   for (const w of inputWords) {
     if (w.length >= 4) {
-      const candidate = movies.find((m) => canonicalizeMovieTitle(m.title).includes(w));
+      const candidate = movies.find((m) =>
+        canonicalizeMovieTitle(m.title).includes(w),
+      );
       if (candidate) return candidate;
     }
   }
@@ -258,9 +297,21 @@ function findMovie(text: string, movies: Movie[]): Movie | null {
   }
 
   // 5. Ordinal / number match: "first movie", "movie 2", "number 3", bare number "1"
-  const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+  const ordinalWords = [
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+  ];
   for (let i = 0; i < ordinalWords.length; i++) {
-    if (text.toLowerCase().includes(`${ordinalWords[i]} movie`)) return movies[i] ?? null;
+    if (text.toLowerCase().includes(`${ordinalWords[i]} movie`))
+      return movies[i] ?? null;
   }
   const numberMatch = text.toLowerCase().match(/(?:movie|number)\s+(\d+)/);
   if (numberMatch) {
@@ -280,17 +331,29 @@ export function findDate(text: string, movie?: Movie | null): string | null {
   if (!lower) return null;
 
   const dates = getDates();
-  const movieDates = movie?.showtimesByDate ? Object.keys(movie.showtimesByDate) : [];
-  const allDateKeys = Array.from(new Set([...movieDates, ...dates.map((d) => d.value)])).sort();
+  const movieDates = movie?.showtimesByDate
+    ? Object.keys(movie.showtimesByDate)
+    : [];
+  const allDateKeys = Array.from(
+    new Set([...movieDates, ...dates.map((d) => d.value)]),
+  ).sort();
   if (!allDateKeys.length) return null;
 
   const dateObjects = allDateKeys.map((val) => {
     const [y, m, d] = val.split("-").map(Number);
     const date = new Date(y, m - 1, d, 12, 0, 0);
-    const weekdayFull = date.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-    const weekdayShort = date.toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
-    const monthFull = date.toLocaleDateString("en-US", { month: "long" }).toLowerCase();
-    const monthShort = date.toLocaleDateString("en-US", { month: "short" }).toLowerCase();
+    const weekdayFull = date
+      .toLocaleDateString("en-US", { weekday: "long" })
+      .toLowerCase();
+    const weekdayShort = date
+      .toLocaleDateString("en-US", { weekday: "short" })
+      .toLowerCase();
+    const monthFull = date
+      .toLocaleDateString("en-US", { month: "long" })
+      .toLowerCase();
+    const monthShort = date
+      .toLocaleDateString("en-US", { month: "short" })
+      .toLowerCase();
     return {
       value: val,
       year: y,
@@ -314,7 +377,10 @@ export function findDate(text: string, movie?: Movie | null): string | null {
 
   // 2. Exact ISO value or slash date match: "2026-11-22", "2026/11/22"
   for (const obj of dateObjects) {
-    if (lower.includes(obj.value) || lower.includes(obj.value.replace(/-/g, "/"))) {
+    if (
+      lower.includes(obj.value) ||
+      lower.includes(obj.value.replace(/-/g, "/"))
+    ) {
       return obj.value;
     }
   }
@@ -353,13 +419,19 @@ export function findDate(text: string, movie?: Movie | null): string | null {
   const bareDayMatch = lower.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
   if (bareDayMatch) {
     const dayNum = parseInt(bareDayMatch[1], 10);
-    const match = dateObjects.find((d) => d.day === dayNum && (movie?.showtimesByDate?.[d.value]?.length ?? 0) > 0)
-      ?? dateObjects.find((d) => d.day === dayNum);
+    const match =
+      dateObjects.find(
+        (d) =>
+          d.day === dayNum &&
+          (movie?.showtimesByDate?.[d.value]?.length ?? 0) > 0,
+      ) ?? dateObjects.find((d) => d.day === dayNum);
     if (match) return match.value;
   }
 
   // 7. Option number: "option 1", "date 2", "1", "2", "first date", "second"
-  const optionMatch = lower.match(/\b(?:option|date|choice|day|number|#)\s*(\d)\b/);
+  const optionMatch = lower.match(
+    /\b(?:option|date|choice|day|number|#)\s*(\d)\b/,
+  );
   if (optionMatch) {
     const idx = parseInt(optionMatch[1], 10) - 1;
     if (idx >= 0 && idx < dateObjects.length) {
@@ -374,9 +446,20 @@ export function findDate(text: string, movie?: Movie | null): string | null {
     }
   }
 
-  const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh"];
+  const ordinalWords = [
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+  ];
   for (let i = 0; i < ordinalWords.length; i++) {
-    if (new RegExp(`\\b${ordinalWords[i]}\\b`).test(lower) && i < dateObjects.length) {
+    if (
+      new RegExp(`\\b${ordinalWords[i]}\\b`).test(lower) &&
+      i < dateObjects.length
+    ) {
       return dateObjects[i].value;
     }
   }
@@ -405,7 +488,9 @@ function findShowtime(text: string, movie: Movie | null): string | null {
     return movie.showtimes[0];
   }
   if (contains(text, "afternoon")) {
-    const af = movie.showtimes.find((s) => s.includes("PM") && parseInt(s) >= 12 && parseInt(s) < 17);
+    const af = movie.showtimes.find(
+      (s) => s.includes("PM") && parseInt(s) >= 12 && parseInt(s) < 17,
+    );
     if (af) return af;
   }
   if (contains(text, "evening", "night", "last show")) {
@@ -417,31 +502,58 @@ function findShowtime(text: string, movie: Movie | null): string | null {
 
 const ROW_WORDS: Record<string, string> = {
   a: "A",
-  b: "B", be: "B", bee: "B",
-  c: "C", see: "C", sea: "C",
-  d: "D", dee: "D",
+  b: "B",
+  be: "B",
+  bee: "B",
+  c: "C",
+  see: "C",
+  sea: "C",
+  d: "D",
+  dee: "D",
   e: "E",
   f: "F",
-  g: "G", gee: "G",
-  h: "H", aitch: "H",
+  g: "G",
+  gee: "G",
+  h: "H",
+  aitch: "H",
 };
 
 const NUM_WORDS: Record<string, number> = {
-  "1": 1, one: 1, won: 1,
-  "2": 2, two: 2, to: 2, too: 2,
-  "3": 3, three: 3, tree: 3, free: 3,
-  "4": 4, four: 4, for: 4, fore: 4,
-  "5": 5, five: 5,
-  "6": 6, six: 6,
-  "7": 7, seven: 7,
-  "8": 8, eight: 8, ate: 8,
-  "9": 9, nine: 9,
-  "10": 10, ten: 10,
-  "11": 11, eleven: 11,
-  "12": 12, twelve: 12,
+  "1": 1,
+  one: 1,
+  won: 1,
+  "2": 2,
+  two: 2,
+  to: 2,
+  too: 2,
+  "3": 3,
+  three: 3,
+  tree: 3,
+  free: 3,
+  "4": 4,
+  four: 4,
+  for: 4,
+  fore: 4,
+  "5": 5,
+  five: 5,
+  "6": 6,
+  six: 6,
+  "7": 7,
+  seven: 7,
+  "8": 8,
+  eight: 8,
+  ate: 8,
+  "9": 9,
+  nine: 9,
+  "10": 10,
+  ten: 10,
+  "11": 11,
+  eleven: 11,
+  "12": 12,
+  twelve: 12,
 };
 
-function parseSeats(text: string): string[] | null {
+export function parseSeats(text: string): string[] | null {
   let normalized = text.toLowerCase().trim();
   // Strip seat/row noise words that appear in spoken input
   normalized = normalized.replace(/\b(?:seat|seats|row|rows)\s*/g, " ");
@@ -449,7 +561,10 @@ function parseSeats(text: string): string[] | null {
   const rowKeys = Object.keys(ROW_WORDS).join("|");
   const numKeys = Object.keys(NUM_WORDS).join("|");
 
-  const pattern = new RegExp(`\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\b`, "g");
+  const pattern = new RegExp(
+    `\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\b`,
+    "g",
+  );
   const seats: string[] = [];
 
   let match: RegExpExecArray | null;
@@ -463,7 +578,10 @@ function parseSeats(text: string): string[] | null {
   }
 
   // Handle row with multiple columns: e.g. "b 3 and 4"
-  const multiPattern = new RegExp(`\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\s*(?:and|,|&)\\s*(${numKeys})\\b`, "g");
+  const multiPattern = new RegExp(
+    `\\b(${rowKeys})\\s*[-:]?\\s*(${numKeys})\\s*(?:and|,|&)\\s*(${numKeys})\\b`,
+    "g",
+  );
   let multiMatch: RegExpExecArray | null;
   while ((multiMatch = multiPattern.exec(normalized)) !== null) {
     const row = ROW_WORDS[multiMatch[1]];
@@ -490,12 +608,19 @@ function parseSeats(text: string): string[] | null {
     }
   }
 
-  return seats.length > 0 ? seats : null;
+  return seats.length > 0
+    ? seats.sort(
+        (a, b) =>
+          a[0].localeCompare(b[0]) || Number(a.slice(1)) - Number(b.slice(1)),
+      )
+    : null;
 }
 
 function listMovies(movies: Movie[]): string {
   if (!movies.length) return "There are no movies currently available to book.";
-  return movies.map((m, i) => `${i + 1}. ${m.title} — ${m.genre}, ${m.rating}`).join("\n");
+  return movies
+    .map((m, i) => `${i + 1}. ${m.title} — ${m.genre}, ${m.rating}`)
+    .join("\n");
 }
 
 function listShowtimes(movie: Movie): string {
@@ -505,12 +630,25 @@ function listShowtimes(movie: Movie): string {
   return `Available showtimes for ${movie.title} are: ${movie.showtimes.join(", ")}.`;
 }
 
-export function parseSeatPreference(text: string): "middle" | "front" | "back" | "center" | null {
-  const lower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (/\b(front|first rows?|near the screen|close to (the )?screen)\b/i.test(lower)) {
+export function parseSeatPreference(
+  text: string,
+): "middle" | "front" | "back" | "center" | null {
+  const lower = text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (
+    /\b(front|first rows?|near the screen|close to (the )?screen)\b/i.test(
+      lower,
+    )
+  ) {
     return "front";
   }
-  if (/\b(back|rear|last rows?|further back|far from (the )?screen)\b/i.test(lower)) {
+  if (
+    /\b(back|rear|last rows?|further back|far from (the )?screen)\b/i.test(
+      lower,
+    )
+  ) {
     return "back";
   }
   if (/\b(center|centre|horizontal center|dead center)\b/i.test(lower)) {
@@ -527,42 +665,97 @@ export function parseSeatPreference(text: string): "middle" | "front" | "back" |
 export function ruleBasedRespond(
   userText: string,
   state: BookingState,
-  movies: Movie[]
+  movies: Movie[],
 ): AssistantResponse {
   const text = userText.trim();
   if (!text) {
     return { text: "I didn't catch that. Could you say that again?" };
   }
 
+  if (
+    (["tickets", "seats", "review", "confirmed"].includes(state.step) &&
+      /^(?:why|what|how|did|do|does|is|are|was|were|haven't|hasn't)\b/i.test(
+        text,
+      )) ||
+    /\b(?:do not|don't|dont|never)\s+(?:change|update|confirm|book|cancel|reset)\b/i.test(
+      text,
+    )
+  ) {
+    if (/hear|listen|microphone|voice/i.test(text))
+      return {
+        text: "Yes—select Speak to dictate a message, Stop when finished, then check the text and select Send. You can also type or use the buttons.",
+      };
+    if (/price|cost|total|much/i.test(text) && state.ticketCount)
+      return {
+        text: `Your ${formatBreakdownSummary(state.ticketBreakdown)} total $${computeTicketPrice(state.ticketBreakdown).toFixed(2)}. I haven’t changed your booking.`,
+      };
+    return {
+      text: `Your booking currently has ${state.ticketCount ? `${formatBreakdownSummary(state.ticketBreakdown)} (${state.ticketCount} tickets)` : "no tickets selected yet"}${state.seats.length ? ` and seats ${state.seats.map((s) => `${s.row}${s.col}`).join(", ")}` : ""}. I haven’t changed anything. Use Edit tickets to change quantities, or tell me the seats you want.`,
+    };
+  }
+
   // Global commands
-  if (contains(text, "restart", "start over", "cancel", "reset", "begin again")) {
+  if (
+    /^(?:please\s+)?(?:restart|start over|cancel(?: booking| my booking)?|reset|begin again)[.!?]?$/i.test(
+      text,
+    )
+  ) {
     return {
       text: "No problem! Let's start fresh. First, please choose your theater location.",
       action: { type: "restart" },
     };
   }
-  const wantsChange = contains(text, "change") && contains(text, "movie", "date", "showtime", "time", "ticket", "seat");
-  if (wantsChange || contains(text, "go back", "previous", "back up", "change my")) {
-    if (contains(text, "movie")) return { text: "Sure, which movie would you like instead?\n" + listMovies(movies), action: { type: "go_back" } };
-    if (contains(text, "date")) return { text: "No problem. Which date works better for you?", action: { type: "go_back" } };
-    if (contains(text, "showtime", "time")) return { text: "Sure, which showtime would you prefer?", action: { type: "go_back" } };
+  const wantsChange =
+    /^(?:please\s+)?(?:change|edit|update|make|set)\b/i.test(text) &&
+    contains(text, "movie", "date", "showtime", "time", "ticket", "seat");
+  if (
+    wantsChange ||
+    contains(text, "go back", "previous", "back up", "change my")
+  ) {
+    if (contains(text, "movie"))
+      return {
+        text:
+          "Sure, which movie would you like instead?\n" + listMovies(movies),
+        action: { type: "go_back" },
+      };
+    if (contains(text, "date"))
+      return {
+        text: "No problem. Which date works better for you?",
+        action: { type: "go_back" },
+      };
+    if (contains(text, "showtime", "time"))
+      return {
+        text: "Sure, which showtime would you prefer?",
+        action: { type: "go_back" },
+      };
     if (contains(text, "ticket")) {
       const parsed = parseTicketBreakdown(text);
       if (parsed && parsed.total >= 1 && parsed.total <= 10) {
         return {
           text: `Got it — updated to ${formatBreakdownSummary(parsed.breakdown)}. Let's pick your seats.`,
-          action: { type: "set_tickets", count: parsed.total, breakdown: parsed.breakdown },
+          action: {
+            type: "set_tickets",
+            count: parsed.total,
+            breakdown: parsed.breakdown,
+          },
         };
       }
-      return { text: "How many tickets would you like? You can specify age groups like '2 adult 4 child' or 'adult 2'.", action: { type: "go_back" } };
+      return {
+        text: "How many tickets would you like? You can specify age groups like '2 adult 4 child' or 'adult 2'.",
+        action: { type: "go_back" },
+      };
     }
-    if (contains(text, "seat")) return { text: "Which seats would you like instead? Just tell me the row and number, like A5 or B3.", action: { type: "go_back" } };
+    if (contains(text, "seat"))
+      return {
+        text: "Which seats would you like instead? Just tell me the row and number, like A5 or B3.",
+        action: { type: "go_back" },
+      };
     return { text: "Sure, let's go back a step.", action: { type: "go_back" } };
   }
   if (
-    state.step === "showtime"
-    && state.movie?.showtimes?.length === 0
-    && contains(text, "another", "different", "other", "next", "change", "date")
+    state.step === "showtime" &&
+    state.movie?.showtimes?.length === 0 &&
+    contains(text, "another", "different", "other", "next", "change", "date")
   ) {
     return {
       text: "No problem. Let’s choose a date that has available showtimes.",
@@ -580,17 +773,45 @@ export function ruleBasedRespond(
           action: { type: "select_movie", movieId: direct.id },
         };
       }
-      if (contains(text, "what else can you do", "what can you do", "help", "how does this work")) {
+      if (
+        contains(
+          text,
+          "what else can you do",
+          "what can you do",
+          "help",
+          "how does this work",
+        )
+      ) {
         return {
           text: "I can help you browse movies, choose a date and showtime, select the number of tickets, find recommended seats, review your booking, and confirm it. You can type or use the microphone. What would you like to do first?",
         };
       }
-      if (contains(text, "what movies", "movies", "list", "options", "playing", "show me")) {
+      if (
+        contains(
+          text,
+          "what movies",
+          "movies",
+          "list",
+          "options",
+          "playing",
+          "show me",
+        )
+      ) {
         return {
           text: `Here are the movies currently showing:\n${listMovies(movies)}\nYou can choose a movie by title, genre, or number.`,
         };
       }
-      if (contains(text, "hello", "hey", "hi", "good morning", "good afternoon", "good evening")) {
+      if (
+        contains(
+          text,
+          "hello",
+          "hey",
+          "hi",
+          "good morning",
+          "good afternoon",
+          "good evening",
+        )
+      ) {
         return {
           text: `Hi! I can help you book movie tickets. Here are the current options:\n${listMovies(movies)}\nWhich movie would you like to see?`,
         };
@@ -610,7 +831,9 @@ export function ruleBasedRespond(
         };
       }
       if (contains(text, "list", "options", "what movies", "show me")) {
-        return { text: `Here are the movies currently showing:\n${listMovies(movies)}` };
+        return {
+          text: `Here are the movies currently showing:\n${listMovies(movies)}`,
+        };
       }
       return {
         text: `I couldn't find that movie. Here are the available options:\n${listMovies(movies)}\nYou can say the title, the genre, or the number.`,
@@ -624,13 +847,19 @@ export function ruleBasedRespond(
         const dInfo = dates.find((d) => d.value === date);
         const [y, m, d] = date.split("-").map(Number);
         const dtObj = new Date(y, m - 1, d, 12, 0, 0);
-        const weekday = dInfo?.weekday ?? dtObj.toLocaleDateString("en-US", { weekday: "short" });
-        const monthShort = dtObj.toLocaleDateString("en-US", { month: "short" });
+        const weekday =
+          dInfo?.weekday ??
+          dtObj.toLocaleDateString("en-US", { weekday: "short" });
+        const monthShort = dtObj.toLocaleDateString("en-US", {
+          month: "short",
+        });
         const label = dInfo?.label ?? `${monthShort} ${d}`;
         const dateScopedMovie = state.movie
           ? {
               ...state.movie,
-              showtimes: (state.movie.showtimesByDate?.[date] ?? []).map((entry) => entry.time),
+              showtimes: (state.movie.showtimesByDate?.[date] ?? []).map(
+                (entry) => entry.time,
+              ),
             }
           : null;
         return {
@@ -639,7 +868,10 @@ export function ruleBasedRespond(
         };
       }
       const dates = getDates();
-      const sample = dates.slice(0, 3).map((d) => `"${d.label}"`).join(", ");
+      const sample = dates
+        .slice(0, 3)
+        .map((d) => `"${d.label}"`)
+        .join(", ");
       return {
         text: `I didn't catch the date. You can say "today", "tomorrow", a weekday like "Friday", a date like ${sample}, or a day number. Which day works for you?`,
       };
@@ -647,7 +879,17 @@ export function ruleBasedRespond(
 
     case "showtime": {
       if (!state.movie?.showtimes.length) {
-        if (contains(text, "another", "different", "other", "next", "change", "date")) {
+        if (
+          contains(
+            text,
+            "another",
+            "different",
+            "other",
+            "next",
+            "change",
+            "date",
+          )
+        ) {
           return {
             text: "No problem. Let’s choose a date that has available showtimes.",
             action: { type: "go_back" },
@@ -673,17 +915,25 @@ export function ruleBasedRespond(
       const parsed = parseTicketBreakdown(text);
       if (parsed) {
         if (parsed.total > 10) {
-          return { text: "I can only book up to 10 tickets at a time. How many tickets would you like?" };
+          return {
+            text: "I can only book up to 10 tickets at a time. How many tickets would you like?",
+          };
         }
         if (parsed.total >= 1) {
           const summary = formatBreakdownSummary(parsed.breakdown);
           return {
-            text: `Got it — ${summary} (${parsed.total} ticket${parsed.total > 1 ? "s" : ""} total). Now let's pick your seats. The theater has rows A through H, 12 seats per row. You can say seat numbers like "A5" or "B3 and B4", or say "pick for me" and I'll select the best available seats.`,
-            action: { type: "set_tickets", count: parsed.total, breakdown: parsed.breakdown },
+            text: `Got it — ${summary} (${parsed.total} ticket${parsed.total > 1 ? "s" : ""} total). Now let's pick your seats. Choose ${parsed.total} seats on the map, or tell me seat labels such as “H6, H7 and H8”. Your ticket types will stay the same.`,
+            action: {
+              type: "set_tickets",
+              count: parsed.total,
+              breakdown: parsed.breakdown,
+            },
           };
         }
       }
-      return { text: "How many tickets would you like? You can say a number from 1 to 10, or specify age groups like '2 adult 4 child' or 'adult 2'." };
+      return {
+        text: "How many tickets would you like? You can say a number from 1 to 10, or specify age groups like '2 adult 4 child' or 'adult 2'.",
+      };
     }
 
     case "seats": {
@@ -707,7 +957,7 @@ export function ruleBasedRespond(
           "different seats",
           "another seat",
           "next alternative",
-          "try different seats"
+          "try different seats",
         )
       ) {
         return {
@@ -717,33 +967,64 @@ export function ruleBasedRespond(
       }
 
       const pref = parseSeatPreference(text);
-      const isFindBest = contains(
-        text,
-        "find best seat",
-        "find best seats",
-        "select best seat",
-        "select best seats",
-        "pick best",
-        "choose best",
-        "pick for me",
-        "choose for me",
-        "any seat",
-        "best seat",
-        "best seats",
-        "don't care",
-        "whatever",
-        "find seats",
-        "pick seats"
-      ) || (pref !== null && contains(text, "seat", "seats", "prefer", "preference", "pick", "find", "choose", "get", "row", "rows"));
+      const isFindBest =
+        contains(
+          text,
+          "find best seat",
+          "find best seats",
+          "select best seat",
+          "select best seats",
+          "pick best",
+          "choose best",
+          "pick for me",
+          "choose for me",
+          "any seat",
+          "best seat",
+          "best seats",
+          "don't care",
+          "whatever",
+          "find seats",
+          "pick seats",
+        ) ||
+        (pref !== null &&
+          contains(
+            text,
+            "seat",
+            "seats",
+            "prefer",
+            "preference",
+            "pick",
+            "find",
+            "choose",
+            "get",
+            "row",
+            "rows",
+          ));
 
       // 1. Check if user wants both find/select best seats AND review
       if (
-        (isFindBest && contains(text, "review", "move forward", "continue", "proceed", "next")) ||
-        contains(text, "select best seats and review", "find best seats and review")
+        (isFindBest &&
+          contains(
+            text,
+            "review",
+            "move forward",
+            "continue",
+            "proceed",
+            "next",
+          )) ||
+        contains(
+          text,
+          "select best seats and review",
+          "find best seats and review",
+        )
       ) {
         return {
-          text: "Selecting the best available seats and proceeding to review your booking.",
-          action: { type: "review_booking" },
+          text: "I’ll suggest seats first. Check the selection, then select Review booking.",
+          action: {
+            type: "select_seats",
+            seats: [],
+            preference: pref ?? undefined,
+          },
         };
       }
 
@@ -759,7 +1040,7 @@ export function ruleBasedRespond(
           "continue",
           "next",
           "confirm seats",
-          "go to review"
+          "go to review",
         )
       ) {
         return {
@@ -768,37 +1049,47 @@ export function ruleBasedRespond(
         };
       }
 
-      // 3. Check if user is updating ticket count
-      const ticketsCheck = parseTicketBreakdown(text);
-      if (ticketsCheck && ticketsCheck.total >= 1) {
-        if (ticketsCheck.total > 10) {
-          return { text: "I can only book up to 10 tickets at a time. How many tickets would you like?" };
-        }
-        const summary = formatBreakdownSummary(ticketsCheck.breakdown);
-        return {
-          text: `Got it — updated to ${summary} (${ticketsCheck.total} ticket${ticketsCheck.total > 1 ? "s" : ""} total). Now let's pick your seats. The theater has rows A through H, 12 seats per row. You can say seat numbers like "A5" or "B3 and B4", say "find best seats", or say "review booking".`,
-          action: { type: "set_tickets", count: ticketsCheck.total, breakdown: ticketsCheck.breakdown },
-        };
-      }
-
-      // 4. Check if user asks to find/select best seats or states seat preference
-      if (isFindBest || pref !== null) {
-        const prefLabel = pref ? ` with preference for ${pref === "front" ? "front rows" : pref === "back" ? "back rows" : pref === "center" ? "horizontal center" : "middle rows"}` : "";
-        return {
-          text: `Finding the best available seats${prefLabel} for you. Say 'review booking' when you're ready to proceed, or choose different seats on the map.`,
-          action: { type: "select_seats", seats: [], preference: pref ?? undefined },
-        };
-      }
       const seats = parseSeats(text);
       if (seats) {
-        if (seats.length !== state.ticketCount) {
+        if (seats.length !== state.ticketCount)
           return {
-            text: `You asked for ${state.ticketCount} ticket${state.ticketCount > 1 ? "s" : ""}, but selected ${seats.length} seat${seats.length > 1 ? "s" : ""}. Please choose ${state.ticketCount} seat${state.ticketCount > 1 ? "s" : ""}. You said: ${seats.join(", ")}.`,
+            text: `Your booking is still ${formatBreakdownSummary(state.ticketBreakdown)} (${state.ticketCount} tickets). I heard ${seats.join(", ")}. Please choose ${state.ticketCount} seats; I haven’t changed your tickets.`,
           };
-        }
         return {
-          text: `Seats ${seats.join(", ")} — got it! Here's your booking summary. Would you like to confirm, or would you like to change anything?`,
+          text: `I heard ${seats.join(", ")}. I’ll check availability for your ${state.ticketCount} tickets.`,
           action: { type: "select_seats", seats },
+        };
+      }
+      // Outside the ticket step, only an explicit change request can alter quantities.
+      const ticketsCheck = isExplicitTicketChange(text)
+        ? parseTicketBreakdown(text)
+        : null;
+      if (ticketsCheck && ticketsCheck.total >= 1) {
+        if (ticketsCheck.total > 10)
+          return {
+            text: "You can book up to 10 tickets. Your current tickets have not changed.",
+          };
+        return {
+          text: `Updated to ${formatBreakdownSummary(ticketsCheck.breakdown)} (${ticketsCheck.total} tickets). Choose your seats next.`,
+          action: {
+            type: "set_tickets",
+            count: ticketsCheck.total,
+            breakdown: ticketsCheck.breakdown,
+          },
+        };
+      }
+      // 4. Check if user asks to find/select best seats or states seat preference
+      if (isFindBest || pref !== null) {
+        const prefLabel = pref
+          ? ` with preference for ${pref === "front" ? "front rows" : pref === "back" ? "back rows" : pref === "center" ? "horizontal center" : "middle rows"}`
+          : "";
+        return {
+          text: `Finding the best available seats${prefLabel} for you. Say 'review booking' when you're ready to proceed, or choose different seats on the map.`,
+          action: {
+            type: "select_seats",
+            seats: [],
+            preference: pref ?? undefined,
+          },
         };
       }
       return {
@@ -807,13 +1098,43 @@ export function ruleBasedRespond(
     }
 
     case "review": {
-      if (contains(text, "confirm", "yes", "looks good", "correct", "that's right", "book it", "done", "perfect")) {
+      const paymentChoice = parsePaymentChoice(text);
+      if (paymentChoice) {
+        return {
+          text: `Payment method set to ${paymentChoice === "venue" ? "pay at venue" : "card payment"}. Say "confirm booking" to complete your reservation.`,
+          action: { type: "select_payment", paymentMethod: paymentChoice },
+        };
+      }
+      if (
+        /\b(?:pay\s*at\s*venue\s*or\s*card|payment\s*options?|what\s*(?:are\s*the\s*)?payment\s*options?)\b/i.test(
+          text,
+        )
+      ) {
+        return {
+          text: "We accept two demonstration payment options: pay at venue or card payment simulation. Which one would you like to use?",
+        };
+      }
+      if (
+        /^(?:yes(?: please)?|confirm(?: (?:my )?booking)?|looks good|correct|that's right|book it|done|perfect)[.!?]?$/i.test(
+          text,
+        )
+      ) {
         return {
           text: `Wonderful! Your booking is confirmed. Here's your ticket — enjoy the show! Would you like to book another movie?`,
           action: { type: "confirm_booking" },
         };
       }
-      if (contains(text, "change", "no", "wrong", "incorrect", "edit", "different")) {
+      if (
+        contains(
+          text,
+          "change",
+          "no",
+          "wrong",
+          "incorrect",
+          "edit",
+          "different",
+        )
+      ) {
         return {
           text: "No problem — what would you like to change? You can say 'change movie', 'change date', 'change showtime', 'change tickets', or 'change seats'.",
         };
@@ -824,16 +1145,22 @@ export function ruleBasedRespond(
     }
 
     case "confirmed": {
-      if (contains(text, "yes", "another", "sure", "book again", "new booking")) {
+      if (
+        contains(text, "yes", "another", "sure", "book again", "new booking")
+      ) {
         return {
           text: "Let's book another movie! First, please choose your theater location.",
           action: { type: "restart" },
         };
       }
       if (contains(text, "no", "that's all", "done", "goodbye", "bye")) {
-        return { text: "Thank you for using Cinevea! Enjoy your movie. You can start a new booking anytime." };
+        return {
+          text: "Thank you for using Cinevea! Enjoy your movie. You can start a new booking anytime.",
+        };
       }
-      return { text: "Would you like to book another movie, or are you all set?" };
+      return {
+        text: "Would you like to book another movie, or are you all set?",
+      };
     }
 
     default:
@@ -842,8 +1169,16 @@ export function ruleBasedRespond(
 }
 
 const ACTION_TYPES = new Set([
-  "select_movie", "select_date", "select_showtime", "set_tickets",
-  "select_seats", "view_alternative", "review_booking", "confirm_booking", "go_back", "restart",
+  "select_movie",
+  "select_date",
+  "select_showtime",
+  "set_tickets",
+  "select_seats",
+  "view_alternative",
+  "review_booking",
+  "confirm_booking",
+  "go_back",
+  "restart",
 ]);
 
 /**
@@ -859,7 +1194,8 @@ export function parseAssistantReply(content: string): AssistantResponse {
     if (!action) {
       try {
         const parsed = JSON.parse(match[1]);
-        if (parsed && ACTION_TYPES.has(parsed.type)) action = parsed as AssistantAction;
+        if (parsed && ACTION_TYPES.has(parsed.type))
+          action = parsed as AssistantAction;
       } catch {
         // malformed action: drop the line, keep the conversational text
       }
@@ -878,8 +1214,11 @@ export async function aiRespond(
   userText: string,
   state: BookingState,
   history: ChatMessage[],
-  movies: Movie[]
+  movies: Movie[],
 ): Promise<AssistantResponse> {
+  if (["tickets", "seats", "review", "confirmed"].includes(state.step)) {
+    return ruleBasedRespond(userText, state, movies);
+  }
   if (!supabase) {
     return ruleBasedRespond(userText, state, movies);
   }
@@ -896,6 +1235,7 @@ export async function aiRespond(
           date: state.date,
           showtime: state.showtime,
           ticketCount: state.ticketCount,
+          ticketBreakdown: state.ticketBreakdown,
           seats: state.seats.map((s) => `${s.row}${s.col}`),
         },
         history: history.slice(-10).map(({ role, text }) => ({ role, text })),
@@ -914,7 +1254,10 @@ export async function aiRespond(
             genre: m.genre,
             rating: m.rating,
             showtimesByDate: Object.fromEntries(
-              Object.entries(m.showtimesByDate ?? {}).map(([date, list]) => [date, list.map((entry) => entry.time)])
+              Object.entries(m.showtimesByDate ?? {}).map(([date, list]) => [
+                date,
+                list.map((entry) => entry.time),
+              ]),
             ),
           })),
         },
@@ -923,10 +1266,12 @@ export async function aiRespond(
     if (error) throw error;
     if (data?.error) throw new Error(String(data.error));
     const content = data?.text;
-    if (typeof content !== "string" || !content.trim()) throw new Error("Chat function returned no response.");
+    if (typeof content !== "string" || !content.trim())
+      throw new Error("Chat function returned no response.");
 
     const reply = parseAssistantReply(content);
-    if (!reply.text && !reply.action) throw new Error("Chat function returned an empty reply.");
+    if (!reply.text && !reply.action)
+      throw new Error("Chat function returned an empty reply.");
     return reply;
   } catch (error) {
     console.warn("AI chat unavailable, using rule-based assistant:", error);

@@ -22,3 +22,5 @@ dist-ssr
 *.sw?
 .env
 movieapidetails.txt
+
+.test-artifacts

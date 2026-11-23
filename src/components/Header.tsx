@@ -1,58 +1,76 @@
-import { useState } from "react";
-import { Film, LogOut, ChevronDown } from "lucide-react";
+import { AccessibilitySettings } from "@/components/AccessibilitySettings";
+import { useEffect, useRef, useState } from "react";
+import { Film, ChevronDown, LogOut } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 export function Header() {
   const { user, signOut } = useAuth();
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const email = user?.email || "";
-  const initials = email.slice(0, 2).toUpperCase();
-
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const outside = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, []);
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between px-5 py-3 border-b border-white/10 bg-[#090d16]/90 backdrop-blur-2xl relative shadow-md shadow-black/20">
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 border border-amber-400/40 flex items-center justify-center shadow-md shadow-amber-950/40">
-          <Film className="w-5 h-5 text-slate-950 stroke-[2.2]" />
-        </div>
-        <div>
-          <h1 className="text-lg font-extrabold tracking-tight leading-none text-white">
-            Cinevea
-          </h1>
-          <p className="text-[11px] text-amber-400/90 leading-none mt-1 font-semibold tracking-wide">
-            Voice-Interactive Booking
-          </p>
-        </div>
+    <header className="site-header">
+      <div className="brand">
+        <span className="brand-mark">
+          <Film size={23} aria-hidden="true" />
+        </span>
+        <span>
+          Cinevea<span className="brand-caption">MAKE ROOM FOR A MOVIE.</span>
+        </span>
       </div>
-      <div className="flex items-center gap-3">
-        {/* User menu */}
-        <div className="relative">
+      <div className="header-tools">
+        <AccessibilitySettings />
+        <div
+          ref={root}
+          className="account"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+              trigger.current?.focus();
+            }
+          }}
+        >
           <button
-            onClick={() => setMenuOpen(!menuOpen)}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 transition-all"
+            ref={trigger}
+            className="account-toggle"
+            aria-expanded={open}
+            aria-controls="account-details"
+            onClick={() => setOpen((v) => !v)}
           >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-500 to-amber-600 border border-amber-400/30 flex items-center justify-center text-xs font-bold text-slate-950 shadow-sm">
-              {initials}
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <span className="account-avatar" aria-hidden="true">
+              {user?.email?.slice(0, 1).toUpperCase() || "C"}
+            </span>
+            <span>Account</span>
+            <ChevronDown size={16} aria-hidden="true" />
           </button>
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 w-56 bg-slate-900/95 rounded-xl border border-white/10 shadow-2xl z-20 overflow-hidden animate-fade-in backdrop-blur-xl">
-                <div className="px-4 py-3 border-b border-white/10">
-                  <p className="text-xs text-amber-400/90 font-medium">Signed in as</p>
-                  <p className="text-sm text-white truncate font-medium">{email}</p>
-                </div>
-                <button
-                  onClick={() => { setMenuOpen(false); signOut(); }}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-sm text-slate-300 hover:text-white hover:bg-amber-500/10 transition-all"
-                >
-                  <LogOut className="w-4 h-4 text-amber-400" />
-                  Sign Out
-                </button>
-              </div>
-            </>
+          {open && (
+            <div id="account-details" className="account-popover">
+              <p className="muted">Signed in as</p>
+              <p className="account-email">{user?.email}</p>
+              {error && <p role="alert">{error}</p>}
+              <button
+                className="secondary-button"
+                onClick={async () => {
+                  try {
+                    await signOut();
+                    setOpen(false);
+                  } catch {
+                    setError("Could not sign out. Please try again.");
+                  }
+                }}
+              >
+                <LogOut size={18} aria-hidden="true" />
+                Sign out
+              </button>
+            </div>
           )}
         </div>
       </div>

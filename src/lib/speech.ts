@@ -1,3 +1,4 @@
+import { rankVoices } from "@/lib/voicePreferences";
 // Browser Speech Recognition + Synthesis wrapper
 // Uses the Web Speech API where available, with graceful fallbacks.
 
@@ -31,9 +32,9 @@ export class SpeechController {
   private voices: SpeechSynthesisVoice[] = [];
   private speaking = false;
   private listening = false;
-  private gotFinalResult = false;
   private speechEndTimer: ReturnType<typeof setTimeout> | null = null;
-  private recognitionRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0;
+  private finishSpeech: (() => void) | null = null;
 
   constructor() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -57,23 +58,41 @@ export class SpeechController {
     return getSpeechRecognitionCtor() !== null;
   }
 
-  private pickVoice(): SpeechSynthesisVoice | null {
-    const canadianVoice = this.voices.find((voice) => voice.lang.toLowerCase() === "en-ca");
-    if (canadianVoice) return canadianVoice;
+  availableVoices(): SpeechSynthesisVoice[] {
+    this.loadVoices();
+    return rankVoices(this.voices);
+  }
 
-    const preferred = [
-      "Google Canadian English",
-      "Samantha",
-      "Microsoft Aria",
-      "Microsoft Zira",
-      "Karen",
-    ];
-    for (const name of preferred) {
-      const v = this.voices.find((vc) => vc.name === name);
-      if (v) return v;
+  getVoiceSettings() {
+    try {
+      return {
+        uri: localStorage.getItem("cinevea-voice-uri") || "",
+        rate: Math.min(
+          1.15,
+          Math.max(
+            0.75,
+            Number(localStorage.getItem("cinevea-voice-rate")) || 0.94,
+          ),
+        ),
+      };
+    } catch {
+      return { uri: "", rate: 0.94 };
     }
-    const enVoice = this.voices.find((vc) => vc.lang.startsWith("en"));
-    return enVoice || this.voices[0] || null;
+  }
+
+  setVoiceSettings(uri: string, rate: number) {
+    try {
+      localStorage.setItem("cinevea-voice-uri", uri);
+      localStorage.setItem("cinevea-voice-rate", String(rate));
+    } catch {
+      /* Private browsing may prevent saving preferences. */
+    }
+  }
+
+  private pickVoice(): SpeechSynthesisVoice | null {
+    const voices = this.availableVoices();
+    const saved = this.getVoiceSettings().uri;
+    return voices.find((v) => v.voiceURI === saved) || voices[0] || null;
   }
 
   speak(text: string, onEnd?: () => void) {
@@ -81,46 +100,36 @@ export class SpeechController {
       onEnd?.();
       return;
     }
-    if (this.speechEndTimer) {
-      clearTimeout(this.speechEndTimer);
-      this.speechEndTimer = null;
-    }
+    const generation = ++this.generation;
     this.synth.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(text.replace(/[*#]/g, ""));
     const voice = this.pickVoice();
-    if (voice) {
-      utterance.voice = voice;
-    }
-    utterance.rate = 1;
-    utterance.pitch = 1.05;
+    if (voice) utterance.voice = voice;
+    utterance.rate = this.getVoiceSettings().rate;
+    utterance.pitch = 1.04;
     utterance.volume = 1;
+    const finish = () => {
+      if (generation !== this.generation) return;
+      this.speaking = false;
+      this.finishSpeech = null;
+      onEnd?.();
+    };
+    this.finishSpeech = finish;
     utterance.onstart = () => {
-      this.speaking = true;
+      if (generation === this.generation) this.speaking = true;
     };
-    utterance.onend = () => {
-      this.speaking = false;
-      this.speechEndTimer = null;
-      onEnd?.();
-    };
-    utterance.onerror = () => {
-      this.speaking = false;
-      this.speechEndTimer = null;
-      onEnd?.();
-    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
     this.synth.speak(utterance);
-    // Some browsers do not fire onend reliably when speech is interrupted.
-    this.speechEndTimer = setTimeout(() => {
-      this.speaking = false;
-      this.speechEndTimer = null;
-      onEnd?.();
-    }, Math.max(2500, text.length * 35));
   }
 
   stopSpeaking() {
-    if (this.synth) {
-      this.synth.cancel();
-      this.speaking = false;
-    }
+    const finish = this.finishSpeech;
+    this.finishSpeech = null;
+    finish?.();
+    ++this.generation;
+    this.synth?.cancel();
+    this.speaking = false;
     if (this.speechEndTimer) {
       clearTimeout(this.speechEndTimer);
       this.speechEndTimer = null;
@@ -131,129 +140,98 @@ export class SpeechController {
     return this.speaking;
   }
 
-  startListening(callbacks: RecognitionCallbacks, retryCount = 0) {
+  startListening(callbacks: RecognitionCallbacks) {
+    this.stopListening(false);
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
-      callbacks.onError("Speech recognition is not supported in this browser. Please type your message instead.");
+      callbacks.onError(
+        "Voice input is unavailable in this browser. Please type your message instead.",
+      );
       return;
     }
-
-    // Stop any ongoing TTS first — Chrome can't do recognition and TTS at the same time
     this.stopSpeaking();
-
-    // If a previous recognition session exists, tear it down completely
-    if (this.recognition) {
-      try {
-        this.recognition.onresult = null;
-        this.recognition.onerror = null;
-        this.recognition.onend = null;
-        this.recognition.abort();
-      } catch {
-        // ignore
-      }
-      this.recognition = null;
-    }
-
-    // Create a FRESH instance every time — reusing one causes
-    // immediate onend in some browsers (especially after TTS)
-    this.recognition = new Ctor();
-    this.recognition.continuous = true;
-    this.recognition.interimResults = true;
-    const browserLanguage = typeof navigator !== "undefined" ? navigator.language : "";
-    this.recognition.lang = browserLanguage.toLowerCase().startsWith("en")
-      ? browserLanguage
-      : "en-US";
-
-    this.gotFinalResult = false;
-    this.listening = true;
-
-    this.recognition.onresult = (event: any) => {
+    const recognition = new Ctor();
+    this.recognition = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    const lang = typeof navigator !== "undefined" ? navigator.language : "";
+    recognition.lang = lang.toLowerCase().startsWith("en") ? lang : "en-US";
+    recognition.maxAlternatives = 1;
+    let failed = false;
+    recognition.onstart = () => {
+      if (this.recognition !== recognition) return;
+      this.listening = true;
+      callbacks.onStart?.();
+    };
+    recognition.onresult = (event: any) => {
+      if (this.recognition !== recognition) return;
       let interim = "";
       let final = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          final += transcript;
-        } else {
-          interim += transcript;
-        }
+        const result = event.results[i];
+        if (result.isFinal) final += result[0].transcript + " ";
+        else interim += result[0].transcript + " ";
       }
-      if (final) {
+      if (final.trim())
         callbacks.onResult({ transcript: final.trim(), isFinal: true });
-      } else if (interim) {
+      if (interim.trim())
         callbacks.onResult({ transcript: interim.trim(), isFinal: false });
-      }
     };
-
-    this.recognition.onerror = (event: any) => {
-      if (event.error === "aborted") {
-        // User stopped manually, or we aborted — don't show an error
-        return;
-      }
+    recognition.onerror = (event: any) => {
+      if (this.recognition !== recognition || event.error === "aborted") return;
+      failed = true;
+      this.listening = false;
+      const messages: Record<string, string> = {
+        "not-allowed":
+          "Microphone access was blocked. Allow it in your browser settings, or type your message.",
+        "service-not-allowed":
+          "Your browser’s speech service is blocked. You can still type or use the booking buttons.",
+        "no-speech":
+          "No speech was detected. Select Speak to try again, or type your message.",
+        "audio-capture":
+          "No microphone was found. Connect a microphone or type your message.",
+        network:
+          "The browser’s speech service could not connect. Check your connection or type your message.",
+      };
+      callbacks.onError(
+        messages[event.error] ||
+          "We could not capture your voice. Please try again or type your message.",
+      );
+    };
+    recognition.onend = () => {
+      if (this.recognition !== recognition) return;
       this.listening = false;
       this.recognition = null;
-      let msg = "Sorry, I didn't catch that. Could you try again?";
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        msg = "Microphone access was blocked. Please allow microphone access in your browser settings and try again, or type your message below.";
-      } else if (event.error === "no-speech") {
-        msg = "I didn't hear anything. Please try speaking again, or type your message below.";
-      } else if (event.error === "audio-capture") {
-        msg = "No microphone was found. Please connect a microphone or type your message below.";
-      } else if (event.error === "network") {
-        if (retryCount === 0) {
-          this.gotFinalResult = true;
-          this.recognitionRetryTimer = setTimeout(() => {
-            this.recognitionRetryTimer = null;
-            this.startListening(callbacks, 1);
-          }, 350);
-          return;
-        }
-        msg = "Your browser's speech service is unavailable right now. Check your connection, then try again, or type your message.";
-      }
-      callbacks.onError(msg);
+      if (!failed) callbacks.onEnd();
     };
-
-    this.recognition.onend = () => {
-      this.listening = false;
-      this.recognition = null;
-      if (!this.gotFinalResult) {
-        callbacks.onEnd();
-      }
-    };
-    this.recognition.onstart = () => {
-      callbacks.onStart?.();
-    };
-
     try {
-      this.recognition.start();
-    } catch (err: any) {
-      // If it's already started, that's fine; otherwise report the error
-      if (err?.name !== "InvalidStateError") {
-        this.listening = false;
-        callbacks.onError("Could not start voice input. Please try again or type your message.");
-      }
+      recognition.start();
+    } catch {
+      this.stopListening(false);
+      callbacks.onError(
+        "The microphone could not start. Please try again or type your message.",
+      );
     }
   }
 
   stopListening(finalize = true) {
-    if (this.recognitionRetryTimer) {
-      clearTimeout(this.recognitionRetryTimer);
-      this.recognitionRetryTimer = null;
-    }
-    if (this.recognition) {
-      try {
-        if (finalize) {
-          this.recognition.stop();
-        } else {
-          this.recognition.onend = null;
-          this.recognition.abort();
-        }
-      } catch {
-        // ignore
+    const recognition = this.recognition;
+    if (!recognition) return;
+    try {
+      if (finalize) recognition.stop();
+      else {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.onstart = null;
+        recognition.abort();
+        this.recognition = null;
+        this.listening = false;
       }
-      if (!finalize) this.recognition = null;
+    } catch {
+      this.recognition = null;
+      this.listening = false;
     }
-    if (!finalize) this.listening = false;
   }
 
   get isListening(): boolean {

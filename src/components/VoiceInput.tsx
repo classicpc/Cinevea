@@ -1,187 +1,242 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Mic, MicOff, Send, Volume2, VolumeX, AlertCircle, X } from "lucide-react";
-import { speechController, type SpeechRecognitionResult } from "@/lib/speech";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { Mic, Square, ArrowUp, RotateCcw, AudioLines } from "lucide-react";
+import { speechController } from "@/lib/speech";
 
 interface VoiceInputProps {
   onSendMessage: (text: string) => void;
   disabled: boolean;
   ttsEnabled: boolean;
   onToggleTts: () => void;
+  onStartHandsFree?: () => void;
 }
-
-export function VoiceInput({ onSendMessage, disabled, ttsEnabled, onToggleTts }: VoiceInputProps) {
-  const voiceSupported = speechController.recognitionSupported;
+export function VoiceInput({
+  onSendMessage,
+  disabled,
+  onStartHandsFree,
+}: VoiceInputProps) {
   const [text, setText] = useState("");
-  const [isListening, setIsListening] = useState(false);
   const [interim, setInterim] = useState("");
-  const [micError, setMicError] = useState<string | null>(null);
-  const interimRef = useRef("");
-
-  useEffect(() => () => {
-    speechController.stopListening(false);
-  }, []);
-
-  const startListening = useCallback(() => {
-    setMicError(null);
-    setInterim("");
-
-    speechController.startListening({
-      onResult: (result: SpeechRecognitionResult) => {
-        if (result.isFinal) {
-          interimRef.current = "";
-          setInterim("");
-          setText((current) => `${current}${current ? " " : ""}${result.transcript}`.trim());
-        } else {
-          interimRef.current = result.transcript;
-          setInterim(result.transcript);
-        }
-      },
-      onError: (error: string) => {
-        interimRef.current = "";
-        setIsListening(false);
-        setInterim("");
-        setMicError(error);
-      },
-      onStart: () => {
-        setIsListening(true);
-      },
-      onEnd: () => {
-        const pending = interimRef.current.trim();
-        if (pending) {
-          setText((current) => `${current}${current ? " " : ""}${pending}`.trim());
-        }
-        interimRef.current = "";
-        setIsListening(false);
-        setInterim("");
-      },
-    });
-  }, []);
-
-  const toggleListening = () => {
-    if (isListening) {
-      speechController.stopListening();
-    } else {
-      setMicError(null);
-      setIsListening(true);
-      startListening();
+  const [state, setState] = useState<
+    "idle" | "starting" | "listening" | "stopping"
+  >("idle");
+  const [error, setError] = useState("");
+  const [heard, setHeard] = useState(false);
+  const finalRef = useRef("");
+  const focusDraftRef = useRef(false);
+  const pendingRef = useRef("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const startTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const active = state !== "idle";
+  const supported = speechController.recognitionSupported;
+  const clearTimer = () => {
+    if (startTimer.current) {
+      clearTimeout(startTimer.current);
+      startTimer.current = null;
     }
   };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSendMessage(trimmed);
-    setText("");
+  useEffect(
+    () => () => {
+      speechController.stopListening(false);
+      clearTimer();
+    },
+    [],
+  );
+  useEffect(() => {
+    if (disabled) {
+      speechController.stopListening(false);
+      setState("idle");
+      setInterim("");
+    } else if (focusDraftRef.current) {
+      focusDraftRef.current = false;
+      inputRef.current?.focus();
+    }
+  }, [disabled]);
+  const start = useCallback(() => {
+    clearTimer();
+    setError("");
+    setInterim("");
+    setHeard(false);
+    pendingRef.current = "";
+    finalRef.current = text;
+    setState("starting");
+    startTimer.current = setTimeout(() => {
+      speechController.stopListening(false);
+      setState("idle");
+      setError("The microphone did not start. Try again or type your message.");
+    }, 8000);
+    speechController.startListening({
+      onStart: () => {
+        clearTimer();
+        setState("listening");
+      },
+      onResult: (r) => {
+        if (r.isFinal) {
+          finalRef.current = `${finalRef.current} ${r.transcript}`.trim();
+          pendingRef.current = "";
+          setText(finalRef.current);
+          setInterim("");
+          setHeard(true);
+        } else {
+          pendingRef.current = r.transcript;
+          setInterim(r.transcript);
+        }
+      },
+      onError: (message) => {
+        clearTimer();
+        setError(message);
+        setState("idle");
+        setInterim("");
+        pendingRef.current = "";
+      },
+      onEnd: () => {
+        clearTimer();
+        const pending = pendingRef.current.trim();
+        if (pending) {
+          setText(`${finalRef.current} ${pending}`.trim());
+          setHeard(true);
+        }
+        pendingRef.current = "";
+        setInterim("");
+        setState("idle");
+        inputRef.current?.focus();
+      },
+    });
+  }, [text]);
+  const stop = () => {
+    clearTimer();
+    setState("stopping");
+    speechController.stopListening();
+    startTimer.current = setTimeout(() => {
+      speechController.stopListening(false);
+      if (pendingRef.current)
+        setText(`${finalRef.current} ${pendingRef.current}`.trim());
+      pendingRef.current = "";
+      setInterim("");
+      setState("idle");
+      inputRef.current?.focus();
+    }, 2000);
   };
-
-  const displayText = interim
-    ? `${text}${text ? " " : ""}${interim}`
-    : text;
-
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!text.trim() || disabled || active) return;
+    focusDraftRef.current = true;
+    onSendMessage(text.trim());
+    setText("");
+    finalRef.current = "";
+    setHeard(false);
+  };
   return (
-    <div className="sticky bottom-0 z-10 border-t border-white/10 bg-[#0a0c16]/95 px-4 py-4 backdrop-blur-2xl">
-      {/* Mic error banner */}
-      {micError && (
-        <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400 animate-fade-in">
-          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span className="flex-1">{micError}</span>
-          <button
-            onClick={() => setMicError(null)}
-            className="text-red-400/60 hover:text-red-400 flex-shrink-0"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
-        {/* Mic button */}
-        <button
-          type="button"
-          onClick={toggleListening}
-          className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-            isListening
-              ? "bg-gradient-to-r from-amber-500 to-amber-600 shadow-md shadow-amber-500/30 animate-pulse text-slate-950"
-              : voiceSupported
-              ? "bg-slate-800/90 hover:bg-amber-500/15 hover:border-amber-400/40 hover:text-amber-300 text-slate-200 border border-white/10"
-              : "bg-slate-800 text-slate-500 hover:bg-slate-700"
-          }`}
-          aria-label={isListening ? "Stop listening" : "Start voice input"}
-          title={
-            voiceSupported
-              ? isListening
-                ? "Stop listening"
-                : "Speak"
-              : "Voice input is not supported in this browser"
-          }
-        >
-          {isListening ? <MicOff className="w-5 h-5 text-slate-950" /> : <Mic className="w-5 h-5" />}
-        </button>
-
-        {/* Text input */}
-        <div className="flex-1 relative">
-          <input
-            type="text"
-            value={displayText}
-            onChange={(e) => !isListening && setText(e.target.value)}
-            placeholder={
-              isListening
-                ? "Listening…"
-                : voiceSupported
-                ? "Type or speak your message…"
-                : "Type your message…"
-            }
-            disabled={disabled && !isListening}
-            aria-label="Message the Cinevea assistant"
-            className="w-full rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder-slate-400 transition-all focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-          />
-          {isListening && interim && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-amber-400">
-              live
-            </span>
+    <form className="voice-composer modern-composer" onSubmit={submit}>
+      <p className="voice-feedback sr-only" role="status" aria-live="polite">
+        {disabled
+          ? "Please wait for the current step…"
+          : state === "starting"
+            ? "Connecting to microphone…"
+            : state === "listening"
+              ? "Listening. Select Stop when you’re finished."
+              : state === "stopping"
+                ? "Finishing your recording…"
+                : heard
+                  ? "Check what we heard. Edit it, then select Send."
+                  : "Type a message or use your microphone."}
+      </p>
+      {error && (
+        <div className="notice notice-error composer-error-alert" role="alert">
+          <p>{error}</p>
+          {supported && (
+            <button
+              type="button"
+              className="text-button"
+              disabled={disabled}
+              onClick={start}
+            >
+              <RotateCcw size={16} aria-hidden="true" />
+              Try microphone again
+            </button>
           )}
         </div>
-
-        {/* TTS toggle */}
-        <button
-          type="button"
-          onClick={onToggleTts}
+      )}
+      <div className="composer-card">
+        <label htmlFor="assistant-message" className="sr-only">
+          Your message
+        </label>
+        <textarea
+          ref={inputRef}
+          id="assistant-message"
+          rows={2}
+          value={interim ? `${text} ${interim}`.trim() : text}
+          readOnly={active}
           disabled={disabled}
-          className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-            ttsEnabled
-              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-              : "bg-slate-800/90 hover:bg-slate-700 text-slate-400 border border-white/10"
-          }`}
-          title={ttsEnabled ? "Mute voice" : "Unmute voice"}
-        >
-          {ttsEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-        </button>
-
-        {/* Send button */}
-        <button
-          type="submit"
-          disabled={disabled || !text.trim()}
-          className="flex-shrink-0 w-11 h-11 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all shadow-md shadow-amber-950/30"
-        >
-          <Send className="w-5 h-5 text-slate-950" />
-        </button>
-      </form>
-      {!voiceSupported && (
-        <p className="text-xs text-slate-500 mt-2 px-1">
-          Voice input isn't available in this browser — you can still type to chat.
-        </p>
-      )}
-      {isListening && (
-        <p className="mt-2 px-1 text-xs font-medium text-amber-400" role="status" aria-live="polite">
-          Listening — speak now
-        </p>
-      )}
-      {!isListening && !micError && voiceSupported && (
-        <p className="mt-2 px-1 text-xs text-slate-500">
-          Press the microphone, then speak.
-        </p>
-      )}
-    </div>
+          onChange={(e) => {
+            setText(e.target.value);
+            finalRef.current = e.target.value;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit(e);
+            }
+          }}
+          placeholder="Message movie guide..."
+          aria-label="Your message"
+          aria-describedby="voice-hint"
+        />
+        <div className="composer-bottom-row">
+          <div className="composer-icons-group">
+            <button
+              type="button"
+              className={`composer-icon-button ${active ? "active-listening" : ""}`}
+              disabled={disabled || !supported || state === "stopping"}
+              onClick={active ? stop : start}
+              aria-label={state === "stopping" ? "Stopping…" : active ? "Stop" : "Speak"}
+              title={active ? "Stop listening" : "Speak"}
+            >
+              {active ? (
+                <Square size={20} aria-hidden="true" />
+              ) : (
+                <Mic size={20} aria-hidden="true" />
+              )}
+              <span className="sr-only">
+                {state === "stopping" ? "Stopping…" : active ? "Stop" : "Speak"}
+              </span>
+            </button>
+            {onStartHandsFree && (
+              <button
+                type="button"
+                className="composer-icon-button"
+                disabled={disabled || !supported}
+                onClick={onStartHandsFree}
+                aria-label="Hands-free mode"
+                title="Hands-free voice mode"
+              >
+                <AudioLines size={20} aria-hidden="true" />
+                <span className="sr-only">Hands-free mode</span>
+              </button>
+            )}
+            <button
+              type="submit"
+              className="composer-send-button"
+              disabled={!text.trim() || disabled || active}
+              aria-label="Send"
+              title="Send message"
+            >
+              <ArrowUp size={20} strokeWidth={2.8} aria-hidden="true" />
+              <span className="sr-only">Send</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <p id="voice-hint" className="sr-only">
+        {supported
+          ? "Voice input uses your browser’s speech service. Messages are sent only when you select Send."
+          : "Voice input is unavailable in this browser. You can complete every step by typing or clicking."}
+      </p>
+    </form>
   );
 }

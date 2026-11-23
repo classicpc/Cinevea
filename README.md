@@ -1,5 +1,7 @@
 # Cinevea
 
+For the accessible interface update and safe local setup, read **START-HERE.md**.
+
 A voice- and text-driven movie ticket booking app. Users pick a location, browse a live movie catalog, choose a date/showtime, select seats on a live seat map, and confirm a booking — guided by a conversational assistant (OpenAI-powered, with a rule-based fallback) and optional voice input.
 
 ## Tech stack
@@ -49,7 +51,7 @@ All tables have Row Level Security enabled; booking/seat-hold mutations go throu
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22.12+
 - A [Supabase](https://supabase.com) project
 - An [OMDb API key](https://www.omdbapi.com/apikey.aspx) (free tier)
 - An [OpenAI API key](https://platform.openai.com/api-keys) with available credits

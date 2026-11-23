@@ -133,6 +133,8 @@ export interface Seat {
 }
 
 export interface BookingState {
+  /** Demonstration choice only; no card details or payment processing. */
+  paymentMethod?: "venue" | "card_demo" | null;
   movie: Movie | null;
   date: string | null;
   showtime: string | null;
